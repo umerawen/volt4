@@ -2709,6 +2709,14 @@ export default function App() {
     return s;
   }, true, true);
 
+  const setDraftTime = (ms) => mutate((s) => {
+    const v = Number(ms);
+    if (!Number.isFinite(v)) return null;
+    s.draftAt = v;
+    s.log.unshift(`Commish set auction start → ${new Date(v).toLocaleString()}`); s.log = s.log.slice(0, 8);
+    return s;
+  }, true, true);
+
   /* ── tournament mutators (Commissioner only) ── */
   const tCreate = (format, matchType, numGroups) => mutate((s) => {
     const ids = s.teams.map((t) => t.id);
@@ -3131,6 +3139,16 @@ export default function App() {
                           )}
                         </span>
                       ))}
+                    </div>
+                  )}
+                  {isAdmin && (
+                    <div className="mt-3 pt-3" style={{ borderTop: "1px solid rgba(61,123,255,0.16)" }}>
+                      <p className="uppercase text-[10px] mb-1.5" style={{ color: "rgba(220,230,255,0.45)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.14em" }}>Set auction start (Commissioner)</p>
+                      <input type="datetime-local"
+                        value={(() => { const d = new Date(state?.draftAt ?? Date.now()); const p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })()}
+                        onChange={(e) => { const ms = new Date(e.target.value).getTime(); if (Number.isFinite(ms)) setDraftTime(ms); }}
+                        className="w-full px-2 py-1.5 text-sm outline-none"
+                        style={{ fontFamily: "'IBM Plex Mono',monospace", background: "rgba(7,12,22,0.9)", border: "1px solid rgba(61,123,255,0.4)", color: "#cfe0ff", colorScheme: "dark", clipPath: "polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px))" }} />
                     </div>
                   )}
                 </div>
