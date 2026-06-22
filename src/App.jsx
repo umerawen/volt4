@@ -906,6 +906,27 @@ function AgentCrest({ agent, hue = "#00e5ff", big = false }) {
   );
 }
 
+// Big hero crest that foregrounds the player's RANK (the meaningful headline stat)
+function RankCrest({ rank }) {
+  const r = RANKS[rank] || RANKS.Iron;
+  const s = 104;
+  const letter = rank === "Radiant" ? "R" : rank[0];
+  return (
+    <div className="relative grid place-items-center" style={{ width: s, height: s }}>
+      <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full">
+        <polygon points="50,4 93,27 93,73 50,96 7,73 7,27" fill="none" stroke={r.c} strokeWidth="3.5" opacity="0.95"
+          style={{ filter: `drop-shadow(0 0 14px ${r.glow})` }} />
+        <polygon points="50,16 81,33 81,67 50,84 19,67 19,33" fill={r.c} opacity="0.16" />
+        <polygon points="50,28 70,39 70,61 50,72 30,61 30,39" fill={r.c} opacity="0.22" />
+      </svg>
+      <span className="relative font-bold uppercase leading-none"
+        style={{ color: r.c, fontSize: s * 0.40, fontFamily: "'Rajdhani',sans-serif", textShadow: `0 0 16px ${r.glow}` }}>
+        {letter}
+      </span>
+    </div>
+  );
+}
+
 function Tag({ children, hue = "#9d6bff" }) {
   return (
     <span className="px-3 py-0.5 text-xs uppercase tracking-widest font-semibold"
@@ -951,8 +972,8 @@ function StatRadar({ player, size = 200, hue }) {
       {axes.map((_, i) => { const [x, y] = pt(i, R); return <line key={i} x1={c} y1={c} x2={x} y2={y} stroke="rgba(255,255,255,0.10)" />; })}
       <polygon points={shape} fill={hue + "33"} stroke={hue} strokeWidth="2" style={{ filter: `drop-shadow(0 0 8px ${hue}88)` }} />
       {axes.map((ax, i) => {
-        const [x, y] = pt(i, R + 16);
-        return <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fontFamily="'Rajdhani',sans-serif"
+        const [x, y] = pt(i, R + 18);
+        return <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize="11" fontFamily="'Rajdhani',sans-serif"
           fontWeight="700" letterSpacing="1" fill="rgba(236,243,255,0.7)">{ax.label}</text>;
       })}
       {axes.map((ax, i) => { const [x, y] = pt(i, R * Math.max(ax.v, 0.05)); return <circle key={i} cx={x} cy={y} r="3" fill={hue} />; })}
@@ -988,12 +1009,11 @@ function PlayerCard({ player }) {
             style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 150, right: -10, top: -18, color: "rgba(255,255,255,0.07)", letterSpacing: "-0.04em" }}>{player.acs}</span>
           <span className="absolute pointer-events-none select-none uppercase font-bold"
             style={{ fontFamily: "'Rajdhani',sans-serif", right: 14, top: 112, fontSize: 12, letterSpacing: 3, color: "rgba(255,255,255,0.18)" }}>ACS</span>
-          <div className="float-soft"><AgentCrest agent={player.agent} hue={r.c} big /></div>
+          <div className="float-soft"><RankCrest rank={player.rank} /></div>
           <h2 className="relative mt-6 text-5xl font-bold uppercase leading-none text-center px-4"
             style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff", letterSpacing: "0.04em", textShadow: `0 0 24px ${r.glow}` }}>{player.name}</h2>
           <div className="relative mt-4 flex items-center gap-3 pb-2">
-            <RankBadge rank={player.rank} />
-            <span className="uppercase tracking-widest font-semibold" style={{ color: r.c, fontFamily: "'Rajdhani',sans-serif" }}>{player.rank}</span>
+            <span className="uppercase tracking-widest font-semibold" style={{ color: r.c, fontFamily: "'Rajdhani',sans-serif", textShadow: `0 0 10px ${r.glow}` }}>{player.rank}</span>
             <span style={{ color: "rgba(236,243,255,0.35)" }}>·</span>
             <span className="uppercase tracking-widest text-sm" style={{ color: "rgba(236,243,255,0.75)" }}>{player.agent}</span>
           </div>
@@ -1025,13 +1045,13 @@ function ScoutModal({ player, onClose, isAdmin, onEdit, onDelete }) {
   const drafted = player.status === "sold";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(5,6,12,0.84)", backdropFilter: "blur(8px)" }} onClick={onClose}>
-      <div className="relative w-full grid md:grid-cols-2 gap-6 items-center" style={{ maxWidth: 820 }} onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full grid md:grid-cols-2 gap-6 items-stretch" style={{ maxWidth: 820 }} onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} className="absolute -top-2 right-0 md:-right-2 z-10 w-9 h-9 grid place-items-center rounded-full"
           style={{ background: "rgba(61,123,255,0.12)", border: "1px solid rgba(61,123,255,0.4)", color: "#ecf3ff" }}>✕</button>
         <PlayerCard player={player} />
-        <div className="p-5" style={{ background: "linear-gradient(160deg, rgba(61,123,255,0.06), rgba(10,15,28,0.55))", border: `1px solid ${r.c}44`, backdropFilter: "blur(12px)", clipPath: "polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px))" }}>
+        <div className="p-5 flex flex-col" style={{ background: "linear-gradient(160deg, rgba(61,123,255,0.06), rgba(10,15,28,0.55))", border: `1px solid ${r.c}44`, backdropFilter: "blur(12px)", clipPath: "polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px))" }}>
           <p className="text-xs uppercase tracking-widest mb-1" style={{ color: r.c }}>Performance profile</p>
-          <div className="grid place-items-center"><StatRadar player={player} hue={r.c} size={230} /></div>
+          <div className="grid place-items-center flex-1 pt-4"><StatRadar player={player} hue={r.c} size={300} /></div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
             <div className="flex justify-between px-3 py-2 rounded" style={{ background: "rgba(61,123,255,0.06)" }}><span style={{ color: "rgba(200,215,255,0.5)" }}>Role</span><span style={{ color: "#ecf3ff" }}>{player.role}</span></div>
             <div className="flex justify-between px-3 py-2 rounded" style={{ background: "rgba(61,123,255,0.06)" }}><span style={{ color: "rgba(200,215,255,0.5)" }}>Agent</span><span style={{ color: "#ecf3ff" }}>{player.agent}</span></div>
