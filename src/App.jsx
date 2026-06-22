@@ -1017,9 +1017,12 @@ function PlayerCard({ player }) {
 }
 
 /* ── full scouting modal with radar ── */
-function ScoutModal({ player, onClose, isAdmin, onEdit }) {
+function ScoutModal({ player, onClose, isAdmin, onEdit, onDelete }) {
+  const [confirmDel, setConfirmDel] = useState(false);
+  useEffect(() => { setConfirmDel(false); }, [player && player.id]);
   if (!player) return null;
   const r = RANKS[player.rank];
+  const drafted = player.status === "sold";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(5,6,12,0.84)", backdropFilter: "blur(8px)" }} onClick={onClose}>
       <div className="relative w-full grid md:grid-cols-2 gap-6 items-center" style={{ maxWidth: 820 }} onClick={(e) => e.stopPropagation()}>
@@ -1040,6 +1043,25 @@ function ScoutModal({ player, onClose, isAdmin, onEdit }) {
               style={{ fontFamily: "'Rajdhani',sans-serif", background: "rgba(61,123,255,0.14)", border: "1px solid rgba(61,123,255,0.5)", color: "#aec6ff", clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
               ✎ Edit player profile
             </button>
+          )}
+          {isAdmin && (
+            confirmDel ? (
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => { onDelete(player.id); onClose(); }} className="flex-1 py-2.5 text-sm font-bold uppercase tracking-widest transition-transform active:scale-95"
+                  style={{ fontFamily: "'Rajdhani',sans-serif", background: "rgba(255,70,85,0.2)", border: "1px solid #ff4655", color: "#ff8a94", clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
+                  Confirm delete
+                </button>
+                <button onClick={() => setConfirmDel(false)} className="px-4 py-2.5 text-sm font-bold uppercase tracking-widest"
+                  style={{ fontFamily: "'Rajdhani',sans-serif", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.16)", color: "rgba(236,243,255,0.6)", clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setConfirmDel(true)} className="mt-2 w-full py-2.5 text-sm font-bold uppercase tracking-widest transition-transform active:scale-95"
+                style={{ fontFamily: "'Rajdhani',sans-serif", background: "rgba(255,70,85,0.1)", border: "1px solid rgba(255,70,85,0.45)", color: "#ff8a94", clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
+                {drafted ? "✕ Delete player (drafted)" : "✕ Delete player"}
+              </button>
+            )
           )}
         </div>
       </div>
@@ -1271,7 +1293,7 @@ function AddPlayerForm({ onAdd, editing, onSave, onCancel }) {
 }
 
 /* ════════════════ TEAM CARD (locker room, editable by admin) ══════ */
-function TeamCard({ team, players, lead, isAdmin, onRename, onScout, onRemove, canRemove, onAddToRoster, onRemoveFromRoster }) {
+function TeamCard({ team, players, lead, isAdmin, onRename, onScout, onRemove, canRemove, onAddToRoster, onRemoveFromRoster, onSetBudget }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(team.name);
   const [cap, setCap] = useState(team.captain);
@@ -1279,7 +1301,11 @@ function TeamCard({ team, players, lead, isAdmin, onRename, onScout, onRemove, c
   const [addOpen, setAddOpen] = useState(false);
   const [addPid, setAddPid] = useState("");
   const [addPrice, setAddPrice] = useState("");
+  const [budgetEdit, setBudgetEdit] = useState(false);
+  const [budgetVal, setBudgetVal] = useState(String(team.budget));
+  useEffect(() => { if (!budgetEdit) setBudgetVal(String(team.budget)); }, [team.budget, budgetEdit]);
   useEffect(() => { if (!editing) { setName(team.name); setCap(team.captain); setConfirmDel(false); } }, [team.name, team.captain, editing]);
+  const saveBudget = () => { const v = Math.max(0, parseInt(budgetVal, 10) || 0); onSetBudget(team.id, v); setBudgetEdit(false); };
 
   const rosterPlayers = team.roster.map((id) => players.find((p) => p.id === id)).filter(Boolean);
   const rolesHave = new Set(rosterPlayers.map((p) => p.role));
@@ -1329,8 +1355,25 @@ function TeamCard({ team, players, lead, isAdmin, onRename, onScout, onRemove, c
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.04)" }}>
-            <p className="text-xs uppercase tracking-widest" style={{ color: "rgba(236,243,255,0.45)" }}>Budget</p>
-            <p className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#ecf3ff" }}>{fmt(team.budget)}</p>
+            <div className="flex items-center gap-1">
+              <p className="text-xs uppercase tracking-widest" style={{ color: "rgba(236,243,255,0.45)" }}>Budget</p>
+              {isAdmin && !budgetEdit && (
+                <button onClick={() => { setBudgetVal(String(team.budget)); setBudgetEdit(true); }} title="Edit budget" className="ml-auto text-[10px] leading-none px-1 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(236,243,255,0.55)" }}>✎</button>
+              )}
+            </div>
+            {isAdmin && budgetEdit ? (
+              <div className="flex items-center gap-1 mt-0.5">
+                <input value={budgetVal} onChange={(e) => setBudgetVal(e.target.value.replace(/[^0-9]/g, ""))}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveBudget(); if (e.key === "Escape") setBudgetEdit(false); }}
+                  inputMode="numeric" autoFocus
+                  className="w-full px-1.5 py-0.5 rounded text-base font-bold outline-none"
+                  style={{ fontFamily: "'IBM Plex Mono',monospace", background: "rgba(10,14,24,0.9)", border: `1px solid ${team.hue}88`, color: "#ecf3ff" }} />
+                <button onClick={saveBudget} className="text-[11px] px-1.5 py-1 rounded shrink-0" style={{ background: "rgba(61,220,132,0.2)", border: "1px solid #3ddc8488", color: "#9af5c2" }}>✓</button>
+                <button onClick={() => setBudgetEdit(false)} className="text-[11px] px-1.5 py-1 rounded shrink-0" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.14)", color: "rgba(236,243,255,0.5)" }}>✕</button>
+              </div>
+            ) : (
+              <p className="text-lg font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#ecf3ff" }}>{fmt(team.budget)}</p>
+            )}
           </div>
           <div className="px-3 py-2 rounded-lg" style={{ background: "rgba(255,255,255,0.04)" }}>
             <p className="text-xs uppercase tracking-widest" style={{ color: "rgba(236,243,255,0.45)" }}>Max bid</p>
@@ -2492,7 +2535,16 @@ export default function App() {
   const SPIN_MS = 7200, REVEAL_MS = 2000;
   const addPlayer = (p) => mutate((s) => { s.players.push(p); return s; });
   const editPlayer = (p) => mutate((s) => { const i = s.players.findIndex((x) => x.id === p.id); if (i < 0) return null; s.players[i] = { ...s.players[i], ...p }; return s; });
-  const removePlayer = (pid) => mutate((s) => { if (s.block?.playerId === pid) return null; s.players = s.players.filter((x) => x.id !== pid); return s; });
+  const removePlayer = (pid) => mutate((s) => {
+    if (s.block?.playerId === pid) return null; // not while on the block
+    const p = s.players.find((x) => x.id === pid);
+    if (p && p.status === "sold" && p.soldTo) {
+      const t = s.teams.find((x) => x.id === p.soldTo);
+      if (t) { t.roster = t.roster.filter((id) => id !== pid); t.budget += Math.max(0, Number(p.soldPrice) || 0); }
+    }
+    s.players = s.players.filter((x) => x.id !== pid);
+    return s;
+  });
   const spinNominate = () => mutate((s) => {
     if (s.block || (s.spin && Date.now() < s.spin.startTs + SPIN_MS + REVEAL_MS)) return null;
     const poolIds = s.players.filter((p) => p.status === "pool").map((p) => p.id);
@@ -2583,6 +2635,14 @@ export default function App() {
     if (refund > 0) t.budget += refund;
     p.status = "pool"; p.soldTo = null; p.soldPrice = null;
     s.log.unshift(`Commish removed ${p.name} from ${t.name}${refund > 0 ? ` — ${fmt(refund)} refunded` : ""}`); s.log = s.log.slice(0, 8);
+    return s;
+  }, true, true);
+
+  const setTeamBudget = (teamId, value) => mutate((s) => {
+    const t = s.teams.find((x) => x.id === teamId); if (!t) return null;
+    const v = Math.max(0, Number(value) || 0);
+    s.log.unshift(`Commish set ${t.name} budget → ${fmt(v)} (was ${fmt(t.budget)})`); s.log = s.log.slice(0, 8);
+    t.budget = v;
     return s;
   }, true, true);
 
@@ -3263,7 +3323,7 @@ export default function App() {
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {state.teams.map((t) => (
-          <TeamCard key={t.id} team={t} players={state.players} lead={block?.leaderId === t.id} isAdmin={isAdmin} onRename={renameTeam} onScout={setScouted} onRemove={removeTeam} canRemove={canRemoveTeam} onAddToRoster={adminAddToRoster} onRemoveFromRoster={adminRemoveFromRoster} />
+          <TeamCard key={t.id} team={t} players={state.players} lead={block?.leaderId === t.id} isAdmin={isAdmin} onRename={renameTeam} onScout={setScouted} onRemove={removeTeam} canRemove={canRemoveTeam} onAddToRoster={adminAddToRoster} onRemoveFromRoster={adminRemoveFromRoster} onSetBudget={setTeamBudget} />
         ))}
         {isAdmin && state.teams.length < MAX_TEAMS && (
           <button onClick={addTeam} className="flex flex-col items-center justify-center gap-2 py-10 transition-all hover:scale-[1.02] min-h-[220px]"
@@ -3324,7 +3384,7 @@ export default function App() {
 
   return shell(
     <>
-      {scoutedPlayer && <ScoutModal player={scoutedPlayer} onClose={() => setScouted(null)} isAdmin={isAdmin} onEdit={(p) => { setEditingPlayer(p); setScouted(null); setView("scout"); }} />}
+      {scoutedPlayer && <ScoutModal player={scoutedPlayer} onClose={() => setScouted(null)} isAdmin={isAdmin} onEdit={(p) => { setEditingPlayer(p); setScouted(null); setView("scout"); }} onDelete={removePlayer} />}
       {TopNav}
       {views[view]}
     </>
