@@ -983,7 +983,7 @@ function StatRadar({ player, size = 200, hue }) {
 
 /* ════════════════ TRADING CARD ════════════════════════════════════ */
 
-function PlayerCard({ player }) {
+function PlayerCard({ player, lite = false }) {
   if (!player) return null;
   const r = RANKS[player.rank] || RANKS.Iron;
   return (
@@ -995,9 +995,9 @@ function PlayerCard({ player }) {
           clipPath: "polygon(0 0, calc(100% - 26px) 0, 100% 26px, 100% 100%, 26px 100%, 0 calc(100% - 26px))",
           background: "linear-gradient(160deg, rgba(20,26,42,0.92), rgba(10,13,22,0.92))",
           border: `1px solid ${r.c}66`, boxShadow: `0 0 0 1px rgba(255,255,255,0.04) inset, 0 30px 60px rgba(0,0,0,0.6)`,
-          backdropFilter: "blur(14px)",
+          backdropFilter: lite ? undefined : "blur(14px)",
         }}>
-        <div className="absolute inset-0 pointer-events-none holo-sweep" />
+        {!lite && <div className="absolute inset-0 pointer-events-none holo-sweep" />}
         <div className="absolute inset-0 pointer-events-none" style={{ background: "repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0 1px, transparent 1px 4px)" }} />
         <div className="flex items-center justify-between px-5 pt-5">
           <span className="text-xs uppercase tracking-widest font-semibold" style={{ color: r.c, fontFamily: "'Rajdhani',sans-serif" }}>// SCOUT FILE</span>
@@ -1009,7 +1009,7 @@ function PlayerCard({ player }) {
             style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 150, right: -10, top: -18, color: "rgba(255,255,255,0.07)", letterSpacing: "-0.04em" }}>{player.acs}</span>
           <span className="absolute pointer-events-none select-none uppercase font-bold"
             style={{ fontFamily: "'Rajdhani',sans-serif", right: 14, top: 112, fontSize: 12, letterSpacing: 3, color: "rgba(255,255,255,0.18)" }}>ACS</span>
-          <div className="float-soft"><RankCrest rank={player.rank} /></div>
+          <div className={lite ? "" : "float-soft"}><RankCrest rank={player.rank} /></div>
           <h2 className="relative mt-6 text-5xl font-bold uppercase leading-none text-center px-4"
             style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff", letterSpacing: "0.04em", textShadow: `0 0 24px ${r.glow}` }}>{player.name}</h2>
           <div className="relative mt-4 flex items-center gap-3 pb-2">
@@ -1127,7 +1127,7 @@ function ReelCard({ player, center, dim, idle }) {
       zIndex: center ? 3 : 1,
     }}>
       <div className="absolute left-1/2 top-1/2" style={{ width: 420, transform: `translate(-50%, -50%) scale(${REEL_SCALE})` }}>
-        <PlayerCard player={player} />
+        <PlayerCard player={player} lite={!center} />
       </div>
     </div>
   );
@@ -1187,7 +1187,9 @@ function ReelStage({ spin, players, pool, isAdmin, onDraw, canDraw }) {
 
   // ── IDLE slow drift (CSS-driven, no per-frame React renders) ──
   // strip is two identical halves; CSS shifts it -50% then loops seamlessly
-  const idleHalf = Array.from({ length: Math.max(n, Math.ceil(stageW / REEL_CARD_W) + 1) }, (_, i) => wheelPool[i % n]);
+  // idle strip only needs enough cards to fill the visible stage (×2 for seamless loop), not the whole pool
+  const idleCount = Math.min(n, Math.ceil(stageW / REEL_CARD_W) + 2);
+  const idleHalf = Array.from({ length: Math.max(idleCount, 4) }, (_, i) => wheelPool[i % n]);
   const idleReel = drawing ? [] : [...idleHalf, ...idleHalf];
 
   const headline = drawing ? (done ? "Target acquired" : "Drawing the next player") : "The draft pool";
@@ -1220,7 +1222,14 @@ function ReelStage({ spin, players, pool, isAdmin, onDraw, canDraw }) {
 
         {drawing ? (
           <div className="absolute top-1/2 flex items-center" style={{ left: 0, transform: `translate(${x}px, -50%)`, willChange: "transform" }}>
-            {drawReel.map((p, i) => <ReelCard key={i} player={p} center={i === centerIdx} dim={i !== centerIdx} />)}
+            {drawReel.map((p, i) => {
+              // windowing: only mount real cards near the visible center; far cards are width-preserving spacers
+              const WIN = 7;
+              if (Math.abs(i - centerIdx) > WIN) {
+                return <div key={i} className="shrink-0" style={{ width: REEL_INNER, height: REEL_CARD_H, marginRight: REEL_GAP }} />;
+              }
+              return <ReelCard key={i} player={p} center={i === centerIdx} dim={i !== centerIdx} />;
+            })}
           </div>
         ) : (
           <div className="absolute top-1/2 flex items-center reel-drift" style={{ left: 0, transform: "translateY(-50%)", willChange: "transform" }}>
@@ -2407,6 +2416,40 @@ export default function App() {
   const [state, setState] = useState(null);
   const [identity, setIdentity] = useState(null);
   const [view, setView] = useState("lobby");
+  const [liveCount, setLiveCount] = useState(1);
+  const sessionIdRef = useRef(null);
+  if (!sessionIdRef.current) sessionIdRef.current = Math.random().toString(36).slice(2, 12);
+  useEffect(() => {
+    const sid = sessionIdRef.current;
+    const KEY = "volt-presence";   // single shared row: { sessionId: lastSeenTs, ... }
+    const FRESH_MS = 14000;        // a session is "live" if seen within 14s
+    const BEAT_MS = 5000;          // heartbeat + recount every 5s
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        const r = await window.storage.get(KEY, true);
+        let map = {};
+        if (r) { try { map = JSON.parse(r.value) || {}; } catch {} }
+        const now = Date.now();
+        map[sid] = now;                                   // stamp myself
+        for (const k of Object.keys(map)) if (now - map[k] >= FRESH_MS) delete map[k]; // prune stale
+        await window.storage.set(KEY, JSON.stringify(map), true);
+        if (!cancelled) setLiveCount(Math.max(1, Object.keys(map).length));
+      } catch {}
+    };
+
+    tick();
+    const iv = setInterval(tick, BEAT_MS);
+    const onLeave = async () => {
+      try {
+        const r = await window.storage.get(KEY, true);
+        if (r) { const map = JSON.parse(r.value) || {}; delete map[sid]; await window.storage.set(KEY, JSON.stringify(map), true); }
+      } catch {}
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => { cancelled = true; clearInterval(iv); onLeave(); window.removeEventListener("beforeunload", onLeave); };
+  }, []);
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState(false);
   const [scouted, setScouted] = useState(null); // player id for modal
@@ -3045,6 +3088,15 @@ export default function App() {
                 <div className="flex items-baseline justify-between gap-3 py-1">
                   <span className="uppercase text-xs" style={{ color: "rgba(220,230,255,0.5)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.12em", whiteSpace: "nowrap" }}>Captains Online</span>
                   <span className="text-sm font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#3ddc84", letterSpacing: "0.04em" }}>{state.teams.length}/{state.teams.length}</span>
+                </div>
+
+                {/* devices live — real-time presence */}
+                <div className="flex items-baseline justify-between gap-3 py-1">
+                  <span className="uppercase text-xs" style={{ color: "rgba(220,230,255,0.5)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.12em", whiteSpace: "nowrap" }}>Devices Live</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="cd-pulse" style={{ width: 5, height: 5, borderRadius: "50%", background: "#3ddc84", color: "#3ddc84" }} />
+                    <span className="text-sm font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#3ddc84", letterSpacing: "0.04em" }}>{liveCount}</span>
+                  </span>
                 </div>
 
                 {/* auction phase — live countdown */}
