@@ -2563,22 +2563,26 @@ export default function App() {
     return s;
   });
 
-  /* ── manual roster edits (Commissioner only) — budget is NEVER touched; price is a display label ── */
+  /* ── manual roster edits (Commissioner only) — add deducts the price, remove refunds it, so budget stays correct ── */
   const adminAddToRoster = (teamId, playerId, price) => mutate((s) => {
     const t = s.teams.find((x) => x.id === teamId); if (!t || emptySlots(t) === 0) return null;
     const p = s.players.find((x) => x.id === playerId); if (!p || p.status === "sold") return null;
     if (s.block?.playerId === playerId) return null; // not while on the block
-    p.status = "sold"; p.soldTo = t.id; p.soldPrice = Math.max(0, Number(price) || 0);
+    const cost = Math.max(0, Number(price) || 0);
+    p.status = "sold"; p.soldTo = t.id; p.soldPrice = cost;
+    t.budget -= cost;            // deduct so add/remove stay symmetric with budget
     t.roster.push(p.id);
-    s.log.unshift(`Commish added ${p.name} → ${t.name} (${fmt(p.soldPrice)})`); s.log = s.log.slice(0, 8);
+    s.log.unshift(`Commish added ${p.name} → ${t.name} (${fmt(cost)})`); s.log = s.log.slice(0, 8);
     return s;
   }, true, true);
   const adminRemoveFromRoster = (teamId, playerId) => mutate((s) => {
     const t = s.teams.find((x) => x.id === teamId); if (!t) return null;
     const p = s.players.find((x) => x.id === playerId); if (!p) return null;
+    const refund = Math.max(0, Number(p.soldPrice) || 0); // refund what was actually paid (auction sales carry a price)
     t.roster = t.roster.filter((id) => id !== playerId);
+    if (refund > 0) t.budget += refund;
     p.status = "pool"; p.soldTo = null; p.soldPrice = null;
-    s.log.unshift(`Commish removed ${p.name} from ${t.name} — back to pool`); s.log = s.log.slice(0, 8);
+    s.log.unshift(`Commish removed ${p.name} from ${t.name}${refund > 0 ? ` — ${fmt(refund)} refunded` : ""}`); s.log = s.log.slice(0, 8);
     return s;
   }, true, true);
 
