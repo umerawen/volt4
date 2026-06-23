@@ -54,15 +54,15 @@ const seatCode = (seatIndex) => String(seatIndex + 1).padStart(4, "0"); // 0-bas
 
 
 const RANKS = {
-  Iron:      { bid: 500,  c: "#8d97a8", glow: "rgba(141,151,168,0.45)" },
-  Bronze:    { bid: 700,  c: "#c08a52", glow: "rgba(192,138,82,0.45)" },
-  Silver:    { bid: 1000,  c: "#d7e1ee", glow: "rgba(215,225,238,0.40)" },
-  Gold:      { bid: 1300,  c: "#f5c453", glow: "rgba(245,196,83,0.45)" },
-  Platinum:  { bid: 1800, c: "#3be8d8", glow: "rgba(59,232,216,0.45)" },
-  Diamond:   { bid: 2300, c: "#c08bff", glow: "rgba(192,139,255,0.50)" },
-  Ascendant: { bid: 3000, c: "#3ddc84", glow: "rgba(61,220,132,0.50)" },
-  Immortal:  { bid: 4000, c: "#ff4d6d", glow: "rgba(255,77,109,0.55)" },
-  Radiant:   { bid: 5000, c: "#fff3b0", glow: "rgba(255,243,176,0.60)" },
+  Iron:      { bid: 300,  c: "#8d97a8", glow: "rgba(141,151,168,0.45)" },
+  Bronze:    { bid: 500,  c: "#c08a52", glow: "rgba(192,138,82,0.45)" },
+  Silver:    { bid: 800,  c: "#d7e1ee", glow: "rgba(215,225,238,0.40)" },
+  Gold:      { bid: 1100,  c: "#f5c453", glow: "rgba(245,196,83,0.45)" },
+  Platinum:  { bid: 1500, c: "#3be8d8", glow: "rgba(59,232,216,0.45)" },
+  Diamond:   { bid: 2000, c: "#c08bff", glow: "rgba(192,139,255,0.50)" },
+  Ascendant: { bid: 2600, c: "#3ddc84", glow: "rgba(61,220,132,0.50)" },
+  Immortal:  { bid: 3500, c: "#ff4d6d", glow: "rgba(255,77,109,0.55)" },
+  Radiant:   { bid: 4500, c: "#fff3b0", glow: "rgba(255,243,176,0.60)" },
 };
 const RANK_LIST = Object.keys(RANKS);
 const ROLES = ["Duelist", "Initiator", "Controller", "Sentinel", "Flex"];
@@ -1752,7 +1752,7 @@ function WarRoom({ teamId, teamHue, players }) {
             <div key={i} className="flex items-center gap-4 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.035)", border: `1px solid ${r ? r.c + "44" : "rgba(255,255,255,0.08)"}` }}>
               <span className="w-7 h-7 grid place-items-center rounded-lg text-sm font-bold shrink-0" style={{ background: "rgba(255,255,255,0.06)", color: teamHue, fontFamily: "'Rajdhani',sans-serif" }}>{i + 1}</span>
               <div className="shrink-0" style={{ width: 300 }}>
-                <PlayerPicker value={slot.playerId} players={avail} onChange={(id) => setSlot(i, { playerId: id })} />
+                <PlayerPicker value={slot.playerId} players={avail} onChange={(id) => { const np = players.find((p) => p.id === id); const minBid = np ? RANKS[np.rank].bid : 0; setSlot(i, { playerId: id, target: id ? String(minBid) : "" }); }} />
               </div>
               {/* slider target bid */}
               <div className="flex-1 min-w-0 flex items-center gap-4" style={{ opacity: slot.playerId ? 1 : 0.35, pointerEvents: slot.playerId ? "auto" : "none" }}>
@@ -1762,13 +1762,15 @@ function WarRoom({ teamId, teamHue, players }) {
                     {sel && <span className="text-xs uppercase tracking-widest" style={{ color: "rgba(236,243,255,0.35)" }}>opens {fmt(RANKS[sel.rank].bid)}</span>}
                   </div>
                   <input type="range" min="0" max={WR_BUDGET} step="100" disabled={!slot.playerId}
-                    value={parseInt(slot.target) || 0} onChange={(e) => setSlot(i, { target: e.target.value })}
+                    value={parseInt(slot.target) || 0} onChange={(e) => { const minBid = sel ? RANKS[sel.rank].bid : 0; setSlot(i, { target: String(Math.max(minBid, parseInt(e.target.value) || 0)) }); }}
                     className="wr-slider w-full" style={{ "--wr-hue": r ? r.c : teamHue, "--wr-pct": ((parseInt(slot.target) || 0) / WR_BUDGET) * 100 + "%" }} />
                 </div>
                 <div className="shrink-0 flex items-center gap-1 px-3 py-2 rounded-lg" style={{ width: 130, background: "rgba(255,255,255,0.05)", border: `1px solid ${r ? r.c + "55" : "rgba(255,255,255,0.12)"}` }}>
                   <span style={{ color: "rgba(236,243,255,0.5)", fontFamily: "'IBM Plex Mono',monospace" }}>$</span>
-                  <input type="number" min="0" max={WR_BUDGET} step="100" disabled={!slot.playerId} value={slot.target}
-                    onChange={(e) => setSlot(i, { target: e.target.value })} placeholder={sel ? String(RANKS[sel.rank].bid) : "0"}
+                  <input type="number" min={sel ? RANKS[sel.rank].bid : 0} max={WR_BUDGET} step="100" disabled={!slot.playerId} value={slot.target}
+                    onChange={(e) => setSlot(i, { target: e.target.value })}
+                    onBlur={(e) => { const minBid = sel ? RANKS[sel.rank].bid : 0; const v = parseInt(e.target.value) || 0; if (slot.playerId && v < minBid) setSlot(i, { target: String(minBid) }); }}
+                    placeholder={sel ? String(RANKS[sel.rank].bid) : "0"}
                     className="w-full bg-transparent outline-none text-right font-bold" style={{ color: r ? r.c : "#ecf3ff", fontFamily: "'IBM Plex Mono',monospace" }} />
                 </div>
               </div>
@@ -3304,7 +3306,10 @@ export default function App() {
         <div className="flex flex-col items-center gap-5 w-full">
           {blockPlayer && !spinLive ? (
             <>
-              <PlayerCard player={blockPlayer} />
+              <button onClick={() => setScouted(blockPlayer.id)} className="group relative w-full max-w-[420px] transition-transform hover:scale-[1.015] active:scale-[0.99]" style={{ cursor: "pointer" }} title="View full scouting file">
+                <PlayerCard player={blockPlayer} />
+                <span className="absolute left-1/2 -translate-x-1/2 -bottom-3 px-3 py-1 text-[10px] uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" style={{ fontFamily: "'Rajdhani',sans-serif", background: "rgba(7,12,22,0.9)", border: "1px solid rgba(61,123,255,0.4)", color: "#7da6ff", clipPath: "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))" }}>Tap for performance radar</span>
+              </button>
               <div className={"flex items-center gap-6 px-8 py-3 " + (flash ? "bid-pop" : "")} style={{ clipPath: "polygon(18px 0,100% 0,calc(100% - 18px) 100%,0 100%)", background: "rgba(61,123,255,0.06)", border: "1px solid rgba(61,123,255,0.45)", backdropFilter: "blur(10px)", boxShadow: "0 0 26px rgba(61,123,255,0.2)" }}>
                 <div className="text-center">
                   <p className="text-xs uppercase tracking-widest" style={{ color: "rgba(200,215,255,0.45)" }}>Current bid</p>
@@ -3315,6 +3320,15 @@ export default function App() {
                   <p className="text-xs uppercase tracking-widest" style={{ color: "rgba(200,215,255,0.45)" }}>Held by</p>
                   <p className="text-xl font-bold uppercase leading-tight" style={{ fontFamily: "'Rajdhani',sans-serif", color: leaderTeam ? leaderTeam.hue : "rgba(200,215,255,0.4)" }}>{leaderTeam ? leaderTeam.name : "No bids yet"}</p>
                 </div>
+                {myTeam && (
+                  <>
+                    <div className="w-px self-stretch" style={{ background: "rgba(120,150,220,0.18)" }} />
+                    <div className="text-center">
+                      <p className="text-xs uppercase tracking-widest" style={{ color: "rgba(200,215,255,0.45)" }}>Your budget</p>
+                      <p className="text-2xl font-bold leading-none" style={{ fontFamily: "'IBM Plex Mono',monospace", color: myTeam.hue, textShadow: `0 0 14px ${myTeam.hue}66` }}>{fmt(myTeam.budget)}</p>
+                    </div>
+                  </>
+                )}
               </div>
 
               {myTeam && (
