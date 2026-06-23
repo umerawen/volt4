@@ -1049,7 +1049,7 @@ function PlayerCard({ player, lite = false }) {
 }
 
 /* ── full scouting modal with radar ── */
-function ScoutModal({ player, onClose, isAdmin, onEdit, onDelete }) {
+function ScoutModal({ player, onClose, isAdmin, onEdit, onDelete, onToggleCaptain }) {
   const [confirmDel, setConfirmDel] = useState(false);
   useEffect(() => { setConfirmDel(false); }, [player && player.id]);
   if (!player) return null;
@@ -1074,6 +1074,16 @@ function ScoutModal({ player, onClose, isAdmin, onEdit, onDelete }) {
             <button onClick={() => onEdit(player)} className="mt-4 w-full py-2.5 text-sm font-bold uppercase tracking-widest transition-transform active:scale-95"
               style={{ fontFamily: "'Rajdhani',sans-serif", background: "rgba(61,123,255,0.14)", border: "1px solid rgba(61,123,255,0.5)", color: "#aec6ff", clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
               ✎ Edit player profile
+            </button>
+          )}
+          {isAdmin && (
+            <button onClick={() => onToggleCaptain(player.id)} className="mt-2 w-full py-2.5 text-sm font-bold uppercase tracking-widest transition-transform active:scale-95"
+              style={{ fontFamily: "'Rajdhani',sans-serif",
+                background: player.isCaptain ? "rgba(245,196,83,0.18)" : "rgba(255,255,255,0.04)",
+                border: `1px solid ${player.isCaptain ? "#f5c453" : "rgba(120,150,220,0.3)"}`,
+                color: player.isCaptain ? "#f5d58a" : "rgba(200,215,255,0.6)",
+                clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
+              {player.isCaptain ? "★ Captain — excluded from draw" : "☆ Tag as captain"}
             </button>
           )}
           {isAdmin && (
@@ -2367,6 +2377,9 @@ const NAV = [
   { id: "block", label: "Auction Block", glyph: "⟁" },
   { id: "locker", label: "Locker Room", glyph: "▦" },
   { id: "warroom", label: "War Room", glyph: "✦" },
+];
+// grouped under the "Tournament" dropdown to keep the nav from overflowing
+const TOURNEY_NAV = [
   { id: "bracket", label: "Brackets", glyph: "◈" },
   { id: "leaderboard", label: "Leaderboard", glyph: "≣" },
   { id: "veto", label: "Map Veto", glyph: "⊘", adminOnly: true },
@@ -2614,6 +2627,8 @@ export default function App() {
   const [state, setState] = useState(null);
   const [identity, setIdentity] = useState(null);
   const [view, setView] = useState("lobby");
+  const [tourneyOpen, setTourneyOpen] = useState(false);
+  useEffect(() => { if (!tourneyOpen) return; const close = () => setTourneyOpen(false); window.addEventListener("click", close); return () => window.removeEventListener("click", close); }, [tourneyOpen]);
   const [liveCount, setLiveCount] = useState(1);
   const sessionIdRef = useRef(null);
   if (!sessionIdRef.current) sessionIdRef.current = Math.random().toString(36).slice(2, 12);
@@ -2808,7 +2823,7 @@ export default function App() {
   });
   const spinNominate = () => mutate((s) => {
     if (s.block || (s.spin && Date.now() < s.spin.startTs + SPIN_MS + REVEAL_MS)) return null;
-    const poolIds = s.players.filter((p) => p.status === "pool").map((p) => p.id);
+    const poolIds = s.players.filter((p) => p.status === "pool" && !p.isCaptain).map((p) => p.id);
     if (!poolIds.length) return null;
     for (let i = poolIds.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [poolIds[i], poolIds[j]] = [poolIds[j], poolIds[i]]; }
     const winnerId = poolIds[Math.floor(Math.random() * poolIds.length)];
@@ -2931,6 +2946,14 @@ export default function App() {
   const removeMatchStat = (pid, idx) => mutate((s) => {
     const p = s.players.find((x) => x.id === pid); if (!p || !Array.isArray(p.tourneyStats)) return null;
     p.tourneyStats.splice(idx, 1);
+    return s;
+  }, true, true);
+
+  // tag a player as a captain → excluded from the auction draw (stays visible/scoutable)
+  const toggleCaptain = (pid) => mutate((s) => {
+    const p = s.players.find((x) => x.id === pid); if (!p) return null;
+    p.isCaptain = !p.isCaptain;
+    s.log.unshift(`${p.name} ${p.isCaptain ? "tagged as captain — excluded from draw" : "untagged as captain"}`); s.log = s.log.slice(0, 8);
     return s;
   }, true, true);
 
@@ -3169,8 +3192,9 @@ export default function App() {
           <span className="text-xl font-bold uppercase tracking-wide" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#eaf1ff" }}>DRAFT</span>
         </div>
 
-        {/* nav tabs */}
-        <nav className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
+        {/* nav tabs — centered between brand and right controls */}
+        <div className="flex items-center justify-center flex-1 min-w-0 gap-1">
+        <nav className="flex items-center gap-1 min-w-0 overflow-x-auto">
           {NAV.filter((nav) => !nav.adminOnly || isAdmin).map((nav) => {
             const active = view === nav.id;
             const live = nav.id === "block" && (block || spinLive);
@@ -3187,8 +3211,46 @@ export default function App() {
           })}
         </nav>
 
+        {/* Tournament group dropdown — sits outside the scrollable nav so its menu can overlay the page */}
+        {(() => {
+          const items = TOURNEY_NAV.filter((nav) => !nav.adminOnly || isAdmin);
+          if (!items.length) return null;
+          const groupActive = items.some((nav) => nav.id === view);
+          return (
+            <div className="relative shrink-0 flex items-center">
+              <span className="mr-2 shrink-0" style={{ width: 1, height: 18, background: "rgba(120,150,220,0.25)" }} />
+              <button onClick={(e) => { e.stopPropagation(); setTourneyOpen((o) => !o); }}
+                className="relative flex items-center gap-2 px-3.5 py-2 transition-all group"
+                style={{ color: groupActive ? "#eaf1ff" : "rgba(200,215,255,0.7)",
+                  background: tourneyOpen || groupActive ? "rgba(61,123,255,0.1)" : "rgba(255,255,255,0.025)",
+                  border: `1px solid ${tourneyOpen || groupActive ? "rgba(61,123,255,0.45)" : "rgba(120,150,220,0.2)"}`,
+                  clipPath: "polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px))" }}>
+                <span className="text-base" style={{ color: groupActive ? "#3d7bff" : "rgba(200,215,255,0.45)" }}>◇</span>
+                <span className="font-semibold uppercase tracking-[0.12em] text-sm" style={{ fontFamily: "'Rajdhani',sans-serif" }}>Tournament</span>
+                <span className="text-[9px] transition-transform" style={{ color: "rgba(200,215,255,0.5)", transform: tourneyOpen ? "rotate(180deg)" : "none" }}>▼</span>
+              </button>
+              {tourneyOpen && (
+                <div className="absolute right-0 z-50 py-1.5" style={{ top: "calc(100% + 8px)", minWidth: 190, background: "rgba(9,13,22,0.98)", border: "1px solid rgba(61,123,255,0.3)", backdropFilter: "blur(12px)", clipPath: "polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))", boxShadow: "0 18px 40px rgba(0,0,0,0.5)" }}>
+                  {items.map((nav) => {
+                    const active = view === nav.id;
+                    return (
+                      <button key={nav.id} onClick={(e) => { e.stopPropagation(); setView(nav.id); setTourneyOpen(false); }}
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left transition-colors"
+                        style={{ background: active ? "rgba(61,123,255,0.14)" : "transparent", color: active ? "#eaf1ff" : "rgba(200,215,255,0.7)" }}>
+                        <span className="text-base" style={{ color: active ? "#3d7bff" : "rgba(200,215,255,0.45)" }}>{nav.glyph}</span>
+                        <span className="font-semibold uppercase tracking-[0.12em] text-sm" style={{ fontFamily: "'Rajdhani',sans-serif" }}>{nav.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+        </div>
+
         {/* seat status + switch, framed with HUD brackets */}
-        <div className="relative flex items-center gap-3 shrink-0 ml-auto pl-4 pr-3 py-1.5">
+        <div className="relative flex items-center gap-3 shrink-0 pl-4 pr-3 py-1.5">
           <span className="absolute left-0 top-0" style={{ width: 9, height: 9, borderLeft: "2px solid rgba(61,123,255,0.6)", borderTop: "2px solid rgba(61,123,255,0.6)" }} />
           <span className="absolute right-0 bottom-0" style={{ width: 9, height: 9, borderRight: "2px solid rgba(61,123,255,0.6)", borderBottom: "2px solid rgba(61,123,255,0.6)" }} />
           <div className="hidden sm:flex flex-col items-end leading-tight">
@@ -3477,7 +3539,8 @@ export default function App() {
               <span style={{ color: "#ff4655" }}>ACS {p.acs}</span>
               <span style={{ color: "#9d6bff" }}>HS {p.hs}%</span>
             </div>
-            {tm ? <p className="mt-2 text-xs uppercase tracking-widest" style={{ color: tm.hue }}>◆ {tm.name} · {fmt(p.soldPrice)}</p>
+            {p.isCaptain ? <p className="mt-2 text-xs uppercase tracking-widest font-bold" style={{ color: "#f5c453" }}>★ Captain · not in draw</p>
+              : tm ? <p className="mt-2 text-xs uppercase tracking-widest" style={{ color: tm.hue }}>◆ {tm.name} · {fmt(p.soldPrice)}</p>
               : <p className="mt-2 text-xs uppercase tracking-widest" style={{ color: "rgba(236,243,255,0.4)" }}>Available · opens {fmt(r.bid)}</p>}
           </button>
         ); })}
@@ -3709,7 +3772,7 @@ export default function App() {
 
   return shell(
     <>
-      {scoutedPlayer && <ScoutModal player={scoutedPlayer} onClose={() => setScouted(null)} isAdmin={isAdmin} onEdit={(p) => { setEditingPlayer(p); setScouted(null); setView("scout"); }} onDelete={removePlayer} />}
+      {scoutedPlayer && <ScoutModal player={scoutedPlayer} onClose={() => setScouted(null)} isAdmin={isAdmin} onEdit={(p) => { setEditingPlayer(p); setScouted(null); setView("scout"); }} onDelete={removePlayer} onToggleCaptain={toggleCaptain} />}
       {TopNav}
       {views[view]}
     </>
