@@ -278,6 +278,18 @@ function propagateElim(t) {
 }
 
 const fmt = (n) => "$" + Number(n || 0).toLocaleString();
+
+// aggregate a player's per-match tournament stats: K/D/A totaled, ACS averaged
+function aggStats(p) {
+  const m = Array.isArray(p.tourneyStats) ? p.tourneyStats : [];
+  const games = m.length;
+  const k = m.reduce((s, e) => s + (e.k || 0), 0);
+  const d = m.reduce((s, e) => s + (e.d || 0), 0);
+  const a = m.reduce((s, e) => s + (e.a || 0), 0);
+  const acs = games ? Math.round(m.reduce((s, e) => s + (e.acs || 0), 0) / games) : 0;
+  const kd = d > 0 ? k / d : k;
+  return { games, k, d, a, acs, kd };
+}
 const emptySlots = (t) => 4 - t.roster.length;
 
 // Starting-bid value for an available player (rank-priced). Lower = cheaper.
@@ -1682,6 +1694,22 @@ function WarRoom({ teamId, teamHue, players }) {
     setDirty(true);
   };
 
+  // browser filters + tap-to-fill
+  const [wrRank, setWrRank] = useState("All");
+  const [wrRole, setWrRole] = useState("All");
+  const [wrQuery, setWrQuery] = useState("");
+  const tapToFill = (p) => {
+    const emptyIdx = lineup.findIndex((s) => !s.playerId);
+    if (emptyIdx === -1) return; // all 4 slots full
+    setSlot(emptyIdx, { playerId: p.id, target: String(RANKS[p.rank].bid) });
+  };
+  const wrChip = (active2, hue = "#3d7bff") => ({
+    fontFamily: "'Rajdhani',sans-serif", fontWeight: 700,
+    background: active2 ? hue + "22" : "rgba(255,255,255,0.04)",
+    border: `1px solid ${active2 ? hue : "rgba(120,150,220,0.18)"}`,
+    color: active2 ? hue : "rgba(200,215,255,0.55)",
+  });
+
   const projected = lineup.reduce((sum, s) => sum + (s.playerId ? (parseInt(s.target) || 0) : 0), 0);
   const over = projected > WR_BUDGET;
   const pct = Math.min((projected / WR_BUDGET) * 100, 100);
@@ -1788,6 +1816,62 @@ function WarRoom({ teamId, teamHue, players }) {
         <button onClick={clearPlan} className="px-5 py-3 text-sm font-bold uppercase tracking-widest rounded-lg" style={{ border: "1px solid rgba(255,70,85,0.4)", color: "#ff8a94" }}>Clear plan</button>
         {dirty ? <span className="text-xs uppercase tracking-widest" style={{ color: "#f5c453" }}>Unsaved changes</span>
           : savedAt ? <span className="text-xs uppercase tracking-widest" style={{ color: "#3ddc84" }}>✓ Saved</span> : null}
+      </div>
+
+      {/* ── player browser (filterable, tap to fill next slot) ── */}
+      <div className="mt-8 pt-6" style={{ borderTop: "1px solid rgba(61,123,255,0.16)" }}>
+        <div className="flex items-center gap-2 mb-3">
+          <span style={{ width: 14, height: 2, background: teamHue }} />
+          <p className="uppercase text-xs font-bold" style={{ color: teamHue, fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.26em" }}>Operator Database</p>
+          <span className="text-xs ml-auto" style={{ color: "rgba(200,215,255,0.4)" }}>Tap a card to fill the next open slot</span>
+        </div>
+
+        <div className="flex items-center gap-2 mb-3 p-2" style={{ background: "rgba(61,123,255,0.05)", border: "1px solid rgba(120,150,220,0.18)", clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
+          <span style={{ color: "rgba(120,150,220,0.5)" }}>⌕</span>
+          <input value={wrQuery} onChange={(e) => setWrQuery(e.target.value)} placeholder="Search players or agents…" className="flex-1 bg-transparent outline-none text-sm" style={{ color: "#ecf3ff" }} />
+        </div>
+        <div className="flex flex-wrap gap-2 mb-2">
+          <button onClick={() => setWrRank("All")} className="px-3 py-1 text-xs uppercase tracking-widest rounded-full" style={wrChip(wrRank === "All")}>All ranks</button>
+          {RANK_LIST.map((r) => <button key={r} onClick={() => setWrRank(r)} className="px-3 py-1 text-xs uppercase tracking-widest rounded-full" style={wrChip(wrRank === r, RANKS[r].c)}>{r}</button>)}
+        </div>
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button onClick={() => setWrRole("All")} className="px-3 py-1 text-xs uppercase tracking-widest rounded-full" style={wrChip(wrRole === "All")}>All roles</button>
+          {ROLES.map((r) => <button key={r} onClick={() => setWrRole(r)} className="px-3 py-1 text-xs uppercase tracking-widest rounded-full" style={wrChip(wrRole === r)}>{ROLE_GLYPH[r]} {r}</button>)}
+        </div>
+
+        <div className="wr-grid">
+          {players
+            .filter((p) => (wrRank === "All" || p.rank === wrRank) && (wrRole === "All" || p.role === wrRole) && (!wrQuery || p.name.toLowerCase().includes(wrQuery.toLowerCase()) || p.agent.toLowerCase().includes(wrQuery.toLowerCase())))
+            .map((p) => {
+              const r = RANKS[p.rank]; const picked = chosenIds.has(p.id); const full = lineup.every((s) => s.playerId);
+              const disabled = picked || full;
+              return (
+                <button key={p.id} onClick={() => tapToFill(p)} disabled={disabled}
+                  className="relative text-left p-3 overflow-hidden transition-transform"
+                  style={{ background: picked ? "rgba(61,220,132,0.08)" : `linear-gradient(150deg, ${r.c}18, rgba(10,15,28,0.5) 60%)`,
+                    border: `1px solid ${picked ? "rgba(61,220,132,0.5)" : r.c + "44"}`,
+                    clipPath: "polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))",
+                    opacity: disabled && !picked ? 0.4 : 1, cursor: disabled ? "default" : "pointer",
+                    transform: disabled ? "none" : undefined }}>
+                  <div className="absolute top-0 left-0 right-0" style={{ height: 2, background: `linear-gradient(90deg, ${r.c}, transparent)` }} />
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-base font-bold uppercase leading-none truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff" }}>{p.name}</p>
+                      <p className="text-[11px] uppercase tracking-widest mt-1" style={{ color: r.c }}>{ROLE_GLYPH[p.role]} {p.role}</p>
+                    </div>
+                    <RankBadge rank={p.rank} size="sm" />
+                  </div>
+                  <div className="flex items-center gap-3 mt-2.5" style={{ fontFamily: "'IBM Plex Mono',monospace" }}>
+                    <span className="text-xs"><span style={{ color: "#5b8dff" }}>{p.acs}</span><span className="text-[9px] ml-0.5" style={{ color: "rgba(200,215,255,0.4)" }}>ACS</span></span>
+                    <span className="text-xs"><span style={{ color: "#3be8d8" }}>{p.kda}</span><span className="text-[9px] ml-0.5" style={{ color: "rgba(200,215,255,0.4)" }}>KDA</span></span>
+                    <span className="text-xs"><span style={{ color: "#c08bff" }}>{p.hs}%</span><span className="text-[9px] ml-0.5" style={{ color: "rgba(200,215,255,0.4)" }}>HS</span></span>
+                    {!picked && <span className="ml-auto text-xs" style={{ color: "rgba(236,243,255,0.55)" }}>{fmt(r.bid)}</span>}
+                  </div>
+                  {picked && <span className="absolute bottom-2 right-2.5 text-[10px] uppercase tracking-widest font-bold" style={{ color: "#3ddc84" }}>✓ In plan</span>}
+                </button>
+              );
+            })}
+        </div>
       </div>
     </div>
   );
@@ -1933,6 +2017,117 @@ function MapTile({ m, onClick, state, stamp, stampColor, disabled }) {
       {/* bottom stamp */}
       {stamp && <span className="absolute left-1/2 -translate-x-1/2 bottom-2 text-[10px] font-semibold tracking-widest whitespace-nowrap" style={{ color: stampColor || "rgba(236,243,255,0.6)" }}>{stamp}</span>}
     </button>
+  );
+}
+
+/* ════════════════ LEADERBOARD (tournament stats, sorted by avg ACS) ══════════ */
+function MatchAddRow({ pid, hue, onAdd }) {
+  const [k, setK] = useState(""); const [d, setD] = useState(""); const [a, setA] = useState(""); const [acs, setAcs] = useState("");
+  const num = (v, set) => (e) => set(e.target.value.replace(/[^0-9]/g, ""));
+  const submit = () => { if (k === "" && d === "" && a === "" && acs === "") return; onAdd(pid, { k, d, a, acs }); setK(""); setD(""); setA(""); setAcs(""); };
+  const field = (label, val, set, ph) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[9px] uppercase tracking-widest" style={{ color: "rgba(200,215,255,0.4)" }}>{label}</span>
+      <input value={val} onChange={num(val, set)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder={ph} inputMode="numeric"
+        className="w-14 px-2 py-1 text-sm outline-none text-center" style={{ fontFamily: "'IBM Plex Mono',monospace", background: "rgba(7,12,22,0.9)", border: "1px solid rgba(61,123,255,0.3)", color: "#ecf3ff" }} />
+    </div>
+  );
+  return (
+    <div className="flex items-end gap-2 flex-wrap">
+      {field("K", k, setK, "0")}{field("D", d, setD, "0")}{field("A", a, setA, "0")}{field("ACS", acs, setAcs, "0")}
+      <button onClick={submit} className="px-3 py-1.5 text-xs font-bold uppercase tracking-widest" style={{ fontFamily: "'Rajdhani',sans-serif", background: "rgba(61,220,132,0.18)", border: "1px solid #3ddc8488", color: "#9af5c2", clipPath: "polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px))" }}>+ Add match</button>
+    </div>
+  );
+}
+
+function Leaderboard({ players, isAdmin, onAddMatch, onRemoveMatch }) {
+  const [expanded, setExpanded] = useState(null); // pid whose match panel is open (admin)
+  const ranked = [...players]
+    .map((p) => ({ p, s: aggStats(p) }))
+    .sort((A, B) => B.s.acs - A.s.acs || B.s.kd - A.s.kd || B.s.k - A.s.k);
+  const anyStats = ranked.some((r) => r.s.games > 0);
+
+  return (
+    <div className="view-in page-wrap py-8">
+      <div className="flex items-center gap-2 mb-2">
+        <span style={{ width: 18, height: 2, background: "#3d7bff" }} />
+        <p className="uppercase text-xs font-semibold" style={{ color: "#5b8dff", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.34em" }}>Performance Rankings</p>
+      </div>
+      <h2 className="font-bold uppercase mb-1" style={{ fontFamily: "'Tungsten','Rajdhani',sans-serif", fontSize: "clamp(2.4rem,5vw,3.8rem)", lineHeight: 0.86, letterSpacing: "0.04em", color: "#f4f8ff", textShadow: "0 0 40px rgba(61,123,255,0.22)" }}>Leader<span style={{ color: "#3d7bff" }}>board</span></h2>
+      <p className="text-sm mb-6" style={{ color: "rgba(200,215,255,0.5)" }}>Ranked by average ACS across matches. {isAdmin ? "Tap a player to log match stats." : "Updated live by the Commissioner."}</p>
+
+      {!anyStats && (
+        <div className="mb-5 px-4 py-3 text-sm" style={{ background: "rgba(61,123,255,0.06)", border: "1px solid rgba(61,123,255,0.25)", color: "rgba(200,215,255,0.6)", clipPath: "polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))" }}>
+          No match stats logged yet. {isAdmin ? "Tap any player below and add a match to start the board." : "The board fills in as matches are played."}
+        </div>
+      )}
+
+      {/* header row */}
+      <div className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] uppercase tracking-widest" style={{ gridTemplateColumns: "40px 1fr 60px 60px 60px 70px 70px 60px", color: "rgba(200,215,255,0.4)", fontFamily: "'Rajdhani',sans-serif" }}>
+        <span>#</span><span>Player</span><span className="text-center">K</span><span className="text-center">D</span><span className="text-center">A</span><span className="text-center">K/D</span><span className="text-center">ACS</span><span className="text-center">GP</span>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {ranked.map(({ p, s }, i) => {
+          const r = RANKS[p.rank] || RANKS.Iron;
+          const top = i < 3 && s.games > 0;
+          const medal = ["#ffd75e", "#cdd7e6", "#e0985a"][i];
+          const isOpen = expanded === p.id;
+          return (
+            <div key={p.id}>
+              <button onClick={() => isAdmin && setExpanded(isOpen ? null : p.id)} disabled={!isAdmin}
+                className="w-full grid items-center gap-3 px-4 py-3 text-left transition-transform"
+                style={{ gridTemplateColumns: "40px 1fr 60px 60px 60px 70px 70px 60px",
+                  background: top ? `linear-gradient(90deg, ${r.c}14, rgba(10,15,28,0.5))` : "rgba(255,255,255,0.025)",
+                  border: `1px solid ${top ? r.c + "55" : "rgba(120,150,220,0.14)"}`,
+                  clipPath: "polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))",
+                  cursor: isAdmin ? "pointer" : "default" }}>
+                <span className="font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, color: top ? medal : "rgba(200,215,255,0.5)", textShadow: top ? `0 0 10px ${medal}88` : "none" }}>{i + 1}</span>
+                <span className="flex items-center gap-2 min-w-0">
+                  <RankBadge rank={p.rank} size="sm" />
+                  <span className="min-w-0">
+                    <span className="block font-bold uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff", letterSpacing: "0.02em" }}>{p.name}</span>
+                    <span className="block text-[11px] truncate" style={{ color: r.c }}>{ROLE_GLYPH[p.role]} {p.role} · {p.rank}</span>
+                  </span>
+                </span>
+                <span className="text-center font-bold hidden md:block" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#9af5c2" }}>{s.k}</span>
+                <span className="text-center hidden md:block" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "rgba(255,138,148,0.85)" }}>{s.d}</span>
+                <span className="text-center hidden md:block" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "rgba(200,215,255,0.7)" }}>{s.a}</span>
+                <span className="text-center hidden md:block font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: s.kd >= 1 ? "#3ddc84" : "#ff8a94" }}>{s.kd.toFixed(2)}</span>
+                <span className="text-center font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 18, color: "#5b8dff", textShadow: "0 0 12px rgba(61,123,255,0.5)" }}>{s.acs}</span>
+                <span className="text-center hidden md:block text-sm" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "rgba(200,215,255,0.5)" }}>{s.games}</span>
+              </button>
+
+              {/* mobile stat strip */}
+              <div className="md:hidden flex items-center gap-3 px-4 py-1.5 text-xs" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "rgba(200,215,255,0.6)" }}>
+                <span style={{ color: "#9af5c2" }}>{s.k}K</span><span style={{ color: "#ff8a94" }}>{s.d}D</span><span>{s.a}A</span>
+                <span style={{ color: s.kd >= 1 ? "#3ddc84" : "#ff8a94" }}>{s.kd.toFixed(2)} K/D</span>
+                <span className="ml-auto" style={{ color: "rgba(200,215,255,0.4)" }}>{s.games} GP</span>
+              </div>
+
+              {isAdmin && isOpen && (
+                <div className="mt-1 mb-1 px-4 py-3 flex flex-col gap-3" style={{ background: "rgba(7,12,22,0.7)", border: `1px solid ${r.c}33`, clipPath: "polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))" }}>
+                  <MatchAddRow pid={p.id} hue={r.c} onAdd={onAddMatch} />
+                  {Array.isArray(p.tourneyStats) && p.tourneyStats.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[10px] uppercase tracking-widest" style={{ color: "rgba(200,215,255,0.4)" }}>Logged matches</span>
+                      {p.tourneyStats.map((e, idx) => (
+                        <div key={idx} className="flex items-center gap-3 text-xs px-2 py-1" style={{ fontFamily: "'IBM Plex Mono',monospace", background: "rgba(255,255,255,0.03)", color: "rgba(220,230,255,0.7)" }}>
+                          <span style={{ color: "rgba(200,215,255,0.4)" }}>M{idx + 1}</span>
+                          <span style={{ color: "#9af5c2" }}>{e.k}</span>/<span style={{ color: "#ff8a94" }}>{e.d}</span>/<span>{e.a}</span>
+                          <span className="ml-2" style={{ color: "#5b8dff" }}>{e.acs} ACS</span>
+                          <button onClick={() => onRemoveMatch(p.id, idx)} className="ml-auto text-xs px-1.5 py-0.5" style={{ color: "#ff8a94", border: "1px solid rgba(255,70,85,0.4)" }}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -2173,6 +2368,7 @@ const NAV = [
   { id: "locker", label: "Locker Room", glyph: "▦" },
   { id: "warroom", label: "War Room", glyph: "✦" },
   { id: "bracket", label: "Brackets", glyph: "◈" },
+  { id: "leaderboard", label: "Leaderboard", glyph: "≣" },
   { id: "veto", label: "Map Veto", glyph: "⊘", adminOnly: true },
 ];
 
@@ -2719,6 +2915,25 @@ export default function App() {
     return s;
   }, true, true);
 
+  // tournament stats — per-match entries that aggregate on the leaderboard (separate from scouting stats)
+  const addMatchStat = (pid, entry) => mutate((s) => {
+    const p = s.players.find((x) => x.id === pid); if (!p) return null;
+    if (!Array.isArray(p.tourneyStats)) p.tourneyStats = [];
+    p.tourneyStats.push({
+      k: Math.max(0, parseInt(entry.k) || 0),
+      d: Math.max(0, parseInt(entry.d) || 0),
+      a: Math.max(0, parseInt(entry.a) || 0),
+      acs: Math.max(0, parseInt(entry.acs) || 0),
+      ts: Date.now(),
+    });
+    return s;
+  }, true, true);
+  const removeMatchStat = (pid, idx) => mutate((s) => {
+    const p = s.players.find((x) => x.id === pid); if (!p || !Array.isArray(p.tourneyStats)) return null;
+    p.tourneyStats.splice(idx, 1);
+    return s;
+  }, true, true);
+
   /* ── tournament mutators (Commissioner only) ── */
   const tCreate = (format, matchType, numGroups) => mutate((s) => {
     const ids = s.teams.map((t) => t.id);
@@ -2904,6 +3119,8 @@ export default function App() {
       @keyframes viewin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
       @media (prefers-reduced-motion: reduce) { .holo-sweep,.bid-pop,.animate-pulse,.idle-rotor,.reel-drift,.burst,.float-soft,.marquee,.sale-flash,.view-in { animation: none !important; } }
       select option { background: #0b0f1a; }
+      .wr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      @media (min-width: 680px) { .wr-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
       .wr-slider { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 999px; outline: none; cursor: pointer;
         background: linear-gradient(90deg, var(--wr-hue) 0%, var(--wr-hue) var(--wr-pct), rgba(255,255,255,0.10) var(--wr-pct), rgba(255,255,255,0.10) 100%); }
       .wr-slider:disabled { cursor: default; }
@@ -3483,7 +3700,11 @@ export default function App() {
     </div>
   );
 
-  const views = { lobby: LobbyView, scout: ScoutView, block: BlockView, locker: LockerView, warroom: WarRoomView, bracket: BracketView, veto: VetoView };
+  const LeaderboardView = (
+    <Leaderboard players={state.players} isAdmin={isAdmin} onAddMatch={addMatchStat} onRemoveMatch={removeMatchStat} />
+  );
+
+  const views = { lobby: LobbyView, scout: ScoutView, block: BlockView, locker: LockerView, warroom: WarRoomView, bracket: BracketView, veto: VetoView, leaderboard: LeaderboardView };
   const scoutedPlayer = scouted ? state.players.find((p) => p.id === scouted) : null;
 
   return shell(
