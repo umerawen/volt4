@@ -2628,7 +2628,9 @@ export default function App() {
   const [identity, setIdentity] = useState(null);
   const [view, setView] = useState("lobby");
   const [tourneyOpen, setTourneyOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   useEffect(() => { if (!tourneyOpen) return; const close = () => setTourneyOpen(false); window.addEventListener("click", close); return () => window.removeEventListener("click", close); }, [tourneyOpen]);
+  useEffect(() => { if (!mobileNavOpen) return; const close = () => setMobileNavOpen(false); window.addEventListener("click", close); return () => window.removeEventListener("click", close); }, [mobileNavOpen]);
   const [liveCount, setLiveCount] = useState(1);
   const sessionIdRef = useRef(null);
   if (!sessionIdRef.current) sessionIdRef.current = Math.random().toString(36).slice(2, 12);
@@ -3142,6 +3144,15 @@ export default function App() {
       @keyframes viewin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
       @media (prefers-reduced-motion: reduce) { .holo-sweep,.bid-pop,.animate-pulse,.idle-rotor,.reel-drift,.burst,.float-soft,.marquee,.sale-flash,.view-in { animation: none !important; } }
       select option { background: #0b0f1a; }
+      .nav-desktop { display: flex; }
+      .nav-mobile-btn { display: none; }
+      @media (max-width: 860px) {
+        .nav-desktop { display: none !important; }
+        .nav-mobile-btn { display: flex !important; }
+      }
+      @media (max-width: 640px) {
+        .hero-cta { padding: 13px 26px !important; gap: 12px !important; letter-spacing: 0.22em !important; font-size: 0.82rem !important; }
+      }
       .wr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       @media (min-width: 680px) { .wr-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
       .wr-slider { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 999px; outline: none; cursor: pointer;
@@ -3192,8 +3203,8 @@ export default function App() {
           <span className="text-xl font-bold uppercase tracking-wide" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#eaf1ff" }}>DRAFT</span>
         </div>
 
-        {/* nav tabs — centered between brand and right controls */}
-        <div className="flex items-center justify-center flex-1 min-w-0 gap-1">
+        {/* nav tabs — centered between brand and right controls (desktop) */}
+        <div className="nav-desktop items-center justify-center flex-1 min-w-0 gap-1">
         <nav className="flex items-center gap-1 min-w-0 overflow-x-auto">
           {NAV.filter((nav) => !nav.adminOnly || isAdmin).map((nav) => {
             const active = view === nav.id;
@@ -3247,6 +3258,37 @@ export default function App() {
             </div>
           );
         })()}
+        </div>
+
+        {/* mobile hamburger — shows full nav as a dropdown */}
+        <div className="nav-mobile-btn relative items-center ml-auto">
+          <button onClick={(e) => { e.stopPropagation(); setMobileNavOpen((o) => !o); }}
+            className="relative flex items-center gap-2 px-3 py-2"
+            style={{ background: mobileNavOpen ? "rgba(61,123,255,0.12)" : "rgba(255,255,255,0.03)", border: "1px solid rgba(61,123,255,0.35)", clipPath: "polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px))" }}>
+            <span className="flex flex-col gap-1">
+              <span style={{ width: 18, height: 2, background: "#7da6ff" }} />
+              <span style={{ width: 18, height: 2, background: "#7da6ff" }} />
+              <span style={{ width: 18, height: 2, background: "#7da6ff" }} />
+            </span>
+            <span className="font-semibold uppercase tracking-[0.12em] text-sm" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#cfe0ff" }}>Menu</span>
+          </button>
+          {mobileNavOpen && (
+            <div className="absolute right-0 z-50 py-1.5" style={{ top: "calc(100% + 10px)", minWidth: 220, background: "rgba(9,13,22,0.99)", border: "1px solid rgba(61,123,255,0.3)", backdropFilter: "blur(12px)", clipPath: "polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px))", boxShadow: "0 18px 44px rgba(0,0,0,0.6)" }}>
+              {[...NAV, ...TOURNEY_NAV].filter((nav) => !nav.adminOnly || isAdmin).map((nav) => {
+                const active = view === nav.id;
+                const live = nav.id === "block" && (block || spinLive);
+                return (
+                  <button key={nav.id} onClick={(e) => { e.stopPropagation(); setView(nav.id); setMobileNavOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors"
+                    style={{ background: active ? "rgba(61,123,255,0.16)" : "transparent", color: active ? "#eaf1ff" : "rgba(200,215,255,0.75)" }}>
+                    <span className="text-base" style={{ color: active ? "#3d7bff" : "rgba(200,215,255,0.45)" }}>{nav.glyph}</span>
+                    <span className="font-semibold uppercase tracking-[0.12em] text-sm" style={{ fontFamily: "'Rajdhani',sans-serif" }}>{nav.label}</span>
+                    {live && <span className="cd-pulse ml-auto" style={{ width: 7, height: 7, borderRadius: "50%", background: "#ff4655", color: "#ff4655" }} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* seat status + switch, framed with HUD brackets */}
@@ -3325,7 +3367,7 @@ export default function App() {
               {/* ENTER AUCTION button — outlined HUD frame, only bottom-right notched,
                   with card-style corner brackets on the three square corners */}
               <div className="mt-7">
-                <button onClick={() => setView("block")} className="ea-btn relative group"
+                <button onClick={() => setView("block")} className="ea-btn hero-cta relative group"
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 18,
                     padding: "18px 44px",
