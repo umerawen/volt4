@@ -111,6 +111,7 @@ function freshState() {
     bidHistory: [],   // [{teamId, amount, ts}] for active block
     soldFlash: null,  // ts of last sale (for red flash)
     lastSoldTo: null, // teamId that secured the most recent sale (for won/lost audio)
+    recentSales: [],  // [{playerId, name, teamId, price, bidCount, ts}] newest-first, for the auction feed ticker
     tournament: null, // { format, matchType, groups, matches, slots, ... } — built by Commissioner
     log: [],
     stamp: Date.now(),
@@ -2854,8 +2855,12 @@ export default function App() {
     if (!team || !p) return null;
     team.budget -= b.currentBid; team.roster.push(p.id);
     p.status = "sold"; p.soldTo = team.id; p.soldPrice = b.currentBid;
+    p.bidCount = s.bidHistory.length; // how many bids this player drew, for the "most contested" storyline
     s.log.unshift(`SOLD — ${p.name} → ${team.name} for ${fmt(b.currentBid)}`); s.log = s.log.slice(0, 8);
     s.block = null; s.bidHistory = []; s.soldFlash = Date.now(); s.lastSoldTo = team.id;
+    if (!Array.isArray(s.recentSales)) s.recentSales = [];
+    s.recentSales.unshift({ playerId: p.id, name: p.name, teamId: team.id, price: b.currentBid, bidCount: p.bidCount || 0, ts: Date.now() });
+    s.recentSales = s.recentSales.slice(0, 10);
     return s;
   }, true);
   const passPlayer = () => mutate((s) => {
@@ -3610,6 +3615,16 @@ export default function App() {
   const myFull = myTeam && emptySlots(myTeam) === 0;
   const canBid = block && myTeam && !iLead && !myFull && myMax >= myReq;
 
+  // auction storylines — derived from sold players (spectator feed)
+  const soldPlayers = state.players.filter((p) => p.status === "sold");
+  const recordSale = soldPlayers.reduce((best, p) => (!best || (p.soldPrice || 0) > (best.soldPrice || 0) ? p : best), null);
+  const mostContested = soldPlayers.reduce((best, p) => (!best || (p.bidCount || 0) > (best.bidCount || 0) ? p : best), null);
+  const totalSpent = soldPlayers.reduce((s, p) => s + (p.soldPrice || 0), 0);
+  const spendByTeam = {};
+  soldPlayers.forEach((p) => { if (p.soldTo) spendByTeam[p.soldTo] = (spendByTeam[p.soldTo] || 0) + (p.soldPrice || 0); });
+  const biggestSpenderId = Object.keys(spendByTeam).reduce((best, id) => (!best || spendByTeam[id] > spendByTeam[best] ? id : best), null);
+  const completedTeams = state.teams.filter((t) => t.roster.length >= 4);
+
   const BlockView = (
     <div className={"view-in relative mx-auto " + (saleFlash ? "sale-flash" : "")} style={{ minHeight: 560, maxWidth: 1760 }}>
       {/* slim budget bar */}
@@ -3709,6 +3724,8 @@ export default function App() {
           )}
         </div>
 
+        {/* bidding war + auction feed, side by side */}
+        <div className="w-full flex flex-col md:flex-row gap-4 justify-center items-stretch">
         {/* bidding war tracker */}
         <div className="w-full max-w-md p-4 rounded-2xl" style={{ background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.09)", backdropFilter: "blur(10px)" }}>
           <p className="text-xs uppercase tracking-widest mb-3" style={{ color: "#ff4655" }}>Bidding war</p>
@@ -3728,6 +3745,93 @@ export default function App() {
               ); })}
             </div>
           )}
+        </div>
+
+        {/* auction feed — running storylines */}
+        <div className="w-full max-w-md p-4 rounded-2xl" style={{ background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.09)", backdropFilter: "blur(10px)" }}>
+          <p className="text-xs uppercase tracking-widest mb-3" style={{ color: "#3d7bff" }}>Auction feed</p>
+          {soldPlayers.length === 0 ? (
+            <p className="text-sm" style={{ color: "rgba(236,243,255,0.4)" }}>Storylines appear as players get sold.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {recordSale && (() => { const tm = teamOf(recordSale.soldTo); return (
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "rgba(245,196,83,0.08)", border: "1px solid rgba(245,196,83,0.3)" }}>
+                  <span className="text-lg shrink-0">🔨</span>
+                  <span className="flex flex-col min-w-0">
+                    <span className="text-[10px] uppercase tracking-widest" style={{ color: "#f5c453", fontFamily: "'Rajdhani',sans-serif" }}>Record sale</span>
+                    <span className="text-sm font-bold uppercase leading-tight truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff" }}>{recordSale.name}</span>
+                    <span className="text-[10px] uppercase tracking-wider leading-tight truncate" style={{ color: tm ? tm.hue : "rgba(236,243,255,0.5)", fontFamily: "'Rajdhani',sans-serif" }}>{tm ? (tm.captain || tm.name) : "—"}</span>
+                  </span>
+                  <span className="ml-auto text-base font-bold shrink-0" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#f5c453" }}>{fmt(recordSale.soldPrice)}</span>
+                </div>
+              ); })()}
+
+              {mostContested && (mostContested.bidCount || 0) > 1 && (() => { const tm = teamOf(mostContested.soldTo); return (
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "rgba(255,70,85,0.08)", border: "1px solid rgba(255,70,85,0.3)" }}>
+                  <span className="text-lg shrink-0">🔥</span>
+                  <span className="flex flex-col min-w-0">
+                    <span className="text-[10px] uppercase tracking-widest" style={{ color: "#ff8a94", fontFamily: "'Rajdhani',sans-serif" }}>Most contested</span>
+                    <span className="text-sm font-bold uppercase leading-tight truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff" }}>{mostContested.name}</span>
+                    <span className="text-[10px] uppercase tracking-wider leading-tight truncate" style={{ color: tm ? tm.hue : "rgba(236,243,255,0.5)", fontFamily: "'Rajdhani',sans-serif" }}>{tm ? (tm.captain || tm.name) : "—"}</span>
+                  </span>
+                  <span className="ml-auto text-sm font-bold shrink-0" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#ff8a94" }}>{mostContested.bidCount} bids</span>
+                </div>
+              ); })()}
+
+              {biggestSpenderId && (() => { const tm = teamOf(biggestSpenderId); return (
+                <div className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: "rgba(61,123,255,0.06)", border: "1px solid rgba(61,123,255,0.25)" }}>
+                  <span className="text-lg shrink-0">💰</span>
+                  <span className="flex flex-col min-w-0">
+                    <span className="text-[10px] uppercase tracking-widest" style={{ color: "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>Biggest spender</span>
+                    <span className="text-sm font-bold uppercase leading-tight truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: tm ? tm.hue : "#ecf3ff" }}>{tm ? (tm.captain || tm.name) : "—"}</span>
+                  </span>
+                  <span className="ml-auto text-sm font-bold shrink-0" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#7da6ff" }}>{fmt(spendByTeam[biggestSpenderId])}</span>
+                </div>
+              ); })()}
+
+              {/* roster complete — milestone callout for any team that's drafted all 4 */}
+              {completedTeams.map((t) => (
+                <div key={t.id} className="flex items-center gap-3 px-3 py-2 rounded-lg" style={{ background: `${t.hue}14`, border: `1px solid ${t.hue}55` }}>
+                  <span className="text-lg shrink-0">✅</span>
+                  <span className="flex flex-col min-w-0">
+                    <span className="text-[10px] uppercase tracking-widest" style={{ color: t.hue, fontFamily: "'Rajdhani',sans-serif" }}>Draft complete</span>
+                    <span className="text-sm font-bold uppercase leading-tight truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff" }}>{t.captain || t.name}</span>
+                    <span className="text-[10px] uppercase tracking-wider leading-tight truncate" style={{ color: t.hue, fontFamily: "'Rajdhani',sans-serif" }}>{t.name} · roster locked</span>
+                  </span>
+                  <span className="ml-auto text-xs font-bold shrink-0" style={{ fontFamily: "'IBM Plex Mono',monospace", color: t.hue }}>4/4</span>
+                </div>
+              ))}
+
+              <div className="flex gap-2 mt-1">
+                <div className="flex-1 px-3 py-2 rounded-lg text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
+                  <p className="text-[10px] uppercase tracking-widest" style={{ color: "rgba(236,243,255,0.45)", fontFamily: "'Rajdhani',sans-serif" }}>Players sold</p>
+                  <p className="text-base font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#ecf3ff" }}>{soldPlayers.length}</p>
+                </div>
+                <div className="flex-1 px-3 py-2 rounded-lg text-center" style={{ background: "rgba(255,255,255,0.03)" }}>
+                  <p className="text-[10px] uppercase tracking-widest" style={{ color: "rgba(236,243,255,0.45)", fontFamily: "'Rajdhani',sans-serif" }}>Total spent</p>
+                  <p className="text-base font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#ecf3ff" }}>{fmt(totalSpent)}</p>
+                </div>
+              </div>
+
+              {/* recent sales ticker — last few hammers, newest first */}
+              {Array.isArray(state.recentSales) && state.recentSales.length > 0 && (
+                <div className="mt-1 pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+                  <p className="text-[10px] uppercase tracking-widest mb-1.5" style={{ color: "rgba(236,243,255,0.4)", fontFamily: "'Rajdhani',sans-serif" }}>Recent sales</p>
+                  <div className="flex flex-col gap-1">
+                    {state.recentSales.slice(0, 5).map((sale) => { const tm = teamOf(sale.teamId); return (
+                      <div key={sale.ts} className="flex items-center gap-2 px-2.5 py-1.5 rounded" style={{ background: "rgba(255,255,255,0.025)" }}>
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tm ? tm.hue : "#888" }} />
+                        <span className="text-xs font-semibold uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: "#ecf3ff" }}>{sale.name}</span>
+                        <span className="text-[10px] uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: tm ? tm.hue : "rgba(236,243,255,0.5)" }}>→ {tm ? (tm.captain || tm.name.split(" ")[0]) : "—"}</span>
+                        <span className="ml-auto text-xs font-bold shrink-0" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "rgba(236,243,255,0.85)" }}>{fmt(sale.price)}</span>
+                      </div>
+                    ); })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         </div>
       </div>
     </div>
