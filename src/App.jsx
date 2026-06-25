@@ -941,7 +941,7 @@ function RankCrest({ rank }) {
 
 function Tag({ children, hue = "#9d6bff" }) {
   return (
-    <span className="px-3 py-0.5 text-xs uppercase tracking-widest font-semibold"
+    <span className="inline-flex items-center px-3.5 py-1.5 text-xs uppercase tracking-widest font-semibold leading-none"
       style={{ fontFamily: "'Rajdhani',sans-serif", color: hue, border: `1px solid ${hue}55`, background: `${hue}14`,
         clipPath: "polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)" }}>
       {children}
@@ -1037,7 +1037,7 @@ function PlayerCard({ player, lite = false }) {
         </div>
         <div className="px-5 pt-5 pb-7">
           <p className="text-xs uppercase tracking-widest mb-2" style={{ color: "rgba(236,243,255,0.4)" }}>Trophy cabinet</p>
-          <div className="flex flex-wrap gap-2" style={{ minHeight: 40 }}>
+          <div className="flex flex-wrap items-center gap-2" style={{ minHeight: 40 }}>
             {player.badges?.length ? player.badges.map((b, i) => <Tag key={i} hue={i % 2 ? "#00e5ff" : "#9d6bff"}>{b}</Tag>)
               : <span className="text-sm" style={{ color: "rgba(236,243,255,0.3)" }}>No titles yet — write the first chapter.</span>}
           </div>
@@ -3455,7 +3455,7 @@ export default function App() {
                             <span style={{ fontSize: "2rem", lineHeight: 0.95, fontWeight: 700, color: "#eaf2ff", textShadow: "0 0 16px rgba(61,123,255,0.55)", letterSpacing: "0.01em" }}>
                               {String(val).padStart(2, "0")}
                             </span>
-                            <span style={{ fontSize: 9, letterSpacing: "0.2em", color: "rgba(140,175,255,0.6)", marginTop: 3 }}>{unit}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.22em", color: "rgba(170,198,255,0.92)", marginTop: 4, fontFamily: "'Rajdhani',sans-serif" }}>{unit}</span>
                           </span>
                           {i < arr.length - 1 && (
                             <span style={{ fontSize: "1.7rem", lineHeight: 0.95, color: "rgba(61,123,255,0.55)", margin: "0 3px", alignSelf: "flex-start" }}>:</span>
@@ -3613,12 +3613,12 @@ export default function App() {
   const BlockView = (
     <div className={"view-in relative mx-auto " + (saleFlash ? "sale-flash" : "")} style={{ minHeight: 560, maxWidth: 1760 }}>
       {/* slim budget bar */}
-      <div className="flex gap-2 overflow-x-auto px-5 md:px-8 pt-5 pb-3">
+      <div className="flex flex-wrap justify-center gap-2 px-5 md:px-8 pt-5 pb-3">
         {state.teams.map((t) => { const lead = block?.leaderId === t.id; return (
-          <div key={t.id} className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: lead ? "rgba(255,70,85,0.16)" : "rgba(255,255,255,0.04)", border: `1px solid ${lead ? "#ff4655" : t.hue + "44"}` }}>
-            <span className="w-2 h-2 rounded-full" style={{ background: t.hue }} />
-            <span className="text-xs font-bold uppercase" style={{ fontFamily: "'Rajdhani',sans-serif", color: t.hue }}>{t.name.split(" ")[0]}</span>
-            <span className="text-xs" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#ecf3ff" }}>{fmt(t.budget)}</span>
+          <div key={t.id} className="shrink-0 flex items-center gap-2.5 px-3.5 py-2 rounded-lg" style={{ background: lead ? "rgba(255,70,85,0.16)" : "rgba(255,255,255,0.04)", border: `1px solid ${lead ? "#ff4655" : t.hue + "44"}` }}>
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: t.hue, boxShadow: `0 0 8px ${t.hue}` }} />
+            <span className="text-sm font-bold uppercase tracking-wide" style={{ fontFamily: "'Rajdhani',sans-serif", color: t.hue }}>{t.name.split(" ")[0]}</span>
+            <span className="text-base" style={{ fontFamily: "'IBM Plex Mono',monospace", color: "#ecf3ff" }}>{fmt(t.budget)}</span>
           </div>
         ); })}
       </div>
@@ -3717,10 +3717,13 @@ export default function App() {
           ) : (
             <div className="flex flex-col gap-2">
               {state.bidHistory.map((h, i) => { const tm = teamOf(h.teamId); return (
-                <div key={h.ts} className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: i === 0 ? tm.hue + "1f" : "rgba(255,255,255,0.03)", border: `1px solid ${i === 0 ? tm.hue + "66" : "transparent"}` }}>
-                  <span className="w-2 h-2 rounded-full" style={{ background: tm.hue }} />
-                  <span className="text-sm font-bold uppercase" style={{ fontFamily: "'Rajdhani',sans-serif", color: tm.hue }}>{tm.name.split(" ")[0]}</span>
-                  <span className="ml-auto text-sm font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", color: i === 0 ? "#ecf3ff" : "rgba(236,243,255,0.6)" }}>{fmt(h.amount)}</span>
+                <div key={h.ts} className="flex items-center gap-2.5 px-3 py-2 rounded-lg" style={{ background: i === 0 ? tm.hue + "1f" : "rgba(255,255,255,0.03)", border: `1px solid ${i === 0 ? tm.hue + "66" : "transparent"}` }}>
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: tm.hue, boxShadow: i === 0 ? `0 0 8px ${tm.hue}` : "none" }} />
+                  <span className="flex flex-col min-w-0">
+                    <span className="text-sm font-bold uppercase leading-tight truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: tm.hue }}>{tm.captain || tm.name.split(" ")[0]}</span>
+                    <span className="text-[10px] uppercase tracking-wider leading-tight truncate" style={{ fontFamily: "'Rajdhani',sans-serif", color: "rgba(236,243,255,0.45)" }}>{tm.name}</span>
+                  </span>
+                  <span className="ml-auto text-sm font-bold shrink-0" style={{ fontFamily: "'IBM Plex Mono',monospace", color: i === 0 ? "#ecf3ff" : "rgba(236,243,255,0.6)" }}>{fmt(h.amount)}</span>
                 </div>
               ); })}
             </div>
