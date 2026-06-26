@@ -348,7 +348,7 @@ function TTeamChip({ team, onClick, active, sub }) {
 }
 
 // editable score row for a single match
-function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo }) {
+function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTime }) {
   const a = teamOf(match.teamA), b = teamOf(match.teamB);
   const bo = match.bo || 1;
   const mapsNeeded = bo === 3 ? 3 : 1;
@@ -368,6 +368,23 @@ function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo }) {
           <span className="w-2 h-2 rounded-full shrink-0" style={{ background: b ? b.hue : "rgba(120,150,220,0.4)" }} />
         </div>
       </div>
+
+      {/* match schedule — everyone sees the time; Commissioner can set it */}
+      {(match.scheduledAt || isAdmin) && (
+        <div className="flex items-center justify-center gap-2 flex-wrap">
+          {match.scheduledAt && (
+            <span className="inline-flex items-center gap-1.5 uppercase tracking-widest px-3 py-1.5 font-bold" style={{ fontSize: 12.5, color: "#9af5c2", fontFamily: "'Rajdhani',sans-serif", background: "rgba(61,220,132,0.1)", border: "1px solid rgba(61,220,132,0.45)", boxShadow: "0 0 14px rgba(61,220,132,0.18)", clipPath: "polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px))" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+              {new Date(match.scheduledAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+            </span>
+          )}
+          {isAdmin && (
+            <input type="datetime-local" className="hud-datetime px-2.5 py-1.5 outline-none"
+              value={match.scheduledAt ? (() => { const d = new Date(match.scheduledAt); const p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })() : ""}
+              onChange={(e) => { const v = e.target.value; onSetTime(locator, v ? new Date(v).getTime() : ""); }} />
+          )}
+        </div>
+      )}
       {!bye && (
         <div className="flex items-center justify-center gap-2.5 flex-wrap">
           {Array.from({ length: mapsNeeded }).map((_, mi) => {
@@ -439,7 +456,7 @@ function TStandings({ teamIds, matches, overrides, teamOf, advance = 1, hue = "#
 }
 
 // one bracket match — two stacked team rows + a score box on the right (reference style)
-function TBracketMatch({ match, locator, teamOf, isAdmin, onSetMap, onSetBo }) {
+function TBracketMatch({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTime }) {
   const a = teamOf(match.teamA), b = teamOf(match.teamB);
   const bo = match.bo || 1;
   const bye = match.teamB == null && match.teamA != null;
@@ -505,12 +522,29 @@ function TBracketMatch({ match, locator, teamOf, isAdmin, onSetMap, onSetBo }) {
           )}
         </div>
       )}
+
+      {/* schedule — visible to all; editable by Commissioner */}
+      {!bye && a && b && (match.scheduledAt || isAdmin) && (
+        <div className="flex items-center justify-center gap-2 px-2 py-1.5 flex-wrap" style={{ borderTop: "1px solid rgba(120,150,220,0.16)" }}>
+          {match.scheduledAt && (
+            <span className="inline-flex items-center gap-1 uppercase tracking-widest font-bold" style={{ fontSize: 11, color: "#9af5c2", fontFamily: "'Rajdhani',sans-serif" }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#3ddc84" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+              {new Date(match.scheduledAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+            </span>
+          )}
+          {isAdmin && onSetTime && (
+            <input type="datetime-local" className="hud-datetime px-2 py-1 outline-none" style={{ fontSize: 11 }}
+              value={match.scheduledAt ? (() => { const d = new Date(match.scheduledAt); const p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })() : ""}
+              onChange={(e) => { const v = e.target.value; onSetTime(locator, v ? new Date(v).getTime() : ""); }} />
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 // single-elim bracket display — columns of matches joined by elbow connector lines
-function TBracket({ rounds, teamOf, isAdmin, onSetMap, onSetBo }) {
+function TBracket({ rounds, teamOf, isAdmin, onSetMap, onSetBo, onSetTime }) {
   const roundName = (ri, total) => {
     const fromEnd = total - 1 - ri;
     if (fromEnd === 0) return "Final";
@@ -530,7 +564,7 @@ function TBracket({ rounds, teamOf, isAdmin, onSetMap, onSetBo }) {
               <p className="uppercase text-sm font-bold tracking-widest text-center mb-3" style={{ color: "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>{roundName(ri, rounds.length)}</p>
               {round.map((m, idx) => (
                 <div key={m.id} className="flex flex-col justify-center flex-1" style={{ position: "relative" }}>
-                  <TBracketMatch match={m} locator={{ kind: "elim", round: ri, idx }} teamOf={teamOf} isAdmin={isAdmin} onSetMap={onSetMap} onSetBo={onSetBo} />
+                  <TBracketMatch match={m} locator={{ kind: "elim", round: ri, idx }} teamOf={teamOf} isAdmin={isAdmin} onSetMap={onSetMap} onSetBo={onSetBo} onSetTime={onSetTime} />
                 </div>
               ))}
             </div>
@@ -780,7 +814,7 @@ function TournamentView({ state, isAdmin, teamOf, actions }) {
   }
 
   // ── LIVE STATE: locked, scores being entered ──
-  const A = { onSetMap: actions.tSetMap, onSetBo: actions.tSetBo };
+  const A = { onSetMap: actions.tSetMap, onSetBo: actions.tSetBo, onSetTime: actions.tSetTime };
   let champion = null;
   if (t.format === "single" && t.rounds?.length) { const fm = t.rounds[t.rounds.length - 1][0]; if (fm?.done) champion = teamOf(fm.winner); }
   if (t.format === "final" || (t.format === "group" && t.final?.done)) champion = teamOf(t.final.winner);
@@ -3065,6 +3099,14 @@ export default function App() {
     return s;
   }, true, true);
 
+  // schedule a match — Commissioner sets date/time, everyone sees it
+  const tSetTime = (locator, ms) => mutate((s) => {
+    const t = s.tournament; if (!t) return null;
+    const m = findMatch(t, locator); if (!m) return null;
+    m.scheduledAt = (ms === "" || ms == null || !Number.isFinite(Number(ms))) ? null : Number(ms);
+    return s;
+  }, true, true);
+
   const tOverride = (teamId, patch) => mutate((s) => {
     const t = s.tournament; if (!t) return null;
     if (!t.overrides) t.overrides = {};
@@ -3160,6 +3202,18 @@ export default function App() {
       }
       .wr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       @media (min-width: 680px) { .wr-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+      .hud-datetime {
+        font-family: 'IBM Plex Mono', monospace; color: #cfe0ff; color-scheme: dark;
+        background: rgba(7,12,22,0.92); border: 1px solid rgba(61,123,255,0.4);
+        clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+        letter-spacing: 0.02em; transition: border-color .15s ease, box-shadow .15s ease;
+      }
+      .hud-datetime:hover, .hud-datetime:focus { border-color: #3d7bff; box-shadow: 0 0 12px rgba(61,123,255,0.3); }
+      .hud-datetime::-webkit-calendar-picker-indicator {
+        filter: invert(58%) sepia(82%) saturate(1500%) hue-rotate(195deg) brightness(102%);
+        cursor: pointer; opacity: 0.85;
+      }
+      .hud-datetime::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       .wr-slider { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 999px; outline: none; cursor: pointer;
         background: linear-gradient(90deg, var(--wr-hue) 0%, var(--wr-hue) var(--wr-pct), rgba(255,255,255,0.10) var(--wr-pct), rgba(255,255,255,0.10) 100%); }
       .wr-slider:disabled { cursor: default; }
@@ -3475,8 +3529,7 @@ export default function App() {
                       <input type="datetime-local"
                         value={(() => { const d = new Date(state?.draftAt ?? Date.now()); const p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })()}
                         onChange={(e) => { const ms = new Date(e.target.value).getTime(); if (Number.isFinite(ms)) setDraftTime(ms); }}
-                        className="w-full px-2 py-1.5 text-sm outline-none"
-                        style={{ fontFamily: "'IBM Plex Mono',monospace", background: "rgba(7,12,22,0.9)", border: "1px solid rgba(61,123,255,0.4)", color: "#cfe0ff", colorScheme: "dark", clipPath: "polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px))" }} />
+                        className="hud-datetime w-full px-2 py-1.5 text-sm outline-none" />
                     </div>
                   )}
                 </div>
@@ -3899,7 +3952,7 @@ export default function App() {
       state={state}
       isAdmin={isAdmin}
       teamOf={teamOf}
-      actions={{ tCreate, tClear, armTClear, tClearArmed, tAssign, tSetSlot, tSetSlotCount, tLock, tSetMap, tSetBo, tOverride }}
+      actions={{ tCreate, tClear, armTClear, tClearArmed, tAssign, tSetSlot, tSetSlotCount, tLock, tSetMap, tSetBo, tSetTime, tOverride }}
     />
   );
 
