@@ -215,6 +215,36 @@ function matchTally(m, teamId) {
   return { rf, ra };
 }
 
+// every match across all phases of a tournament, flattened (for prediction scoring)
+function allTournamentMatches(t) {
+  if (!t) return [];
+  const out = [];
+  if (t.format === "group" && t.groups) t.groups.forEach((g) => (t.matches?.[g.id] || []).forEach((m) => out.push(m)));
+  if (t.format === "roundrobin") (t.matches || []).forEach((m) => out.push(m));
+  if (t.semis) t.semis.forEach((m) => out.push(m));
+  if (t.final) out.push(t.final);
+  if (t.rounds) t.rounds.forEach((rd) => rd.forEach((m) => out.push(m)));
+  return out;
+}
+
+// tally each named predictor's correct picks across all decided matches.
+// a vote is correct when voters[name] side matches the winning team.
+function predictorScores(t) {
+  const tally = {}; // name -> { correct, total }
+  allTournamentMatches(t).forEach((m) => {
+    if (!m || !m.done || !m.voters) return;
+    const winnerSide = m.winner === m.teamA ? "a" : m.winner === m.teamB ? "b" : null;
+    if (!winnerSide) return;
+    Object.entries(m.voters).forEach(([name, side]) => {
+      if (!tally[name]) tally[name] = { correct: 0, total: 0 };
+      tally[name].total++;
+      if (side === winnerSide) tally[name].correct++;
+    });
+  });
+  return Object.entries(tally).map(([name, v]) => ({ name, correct: v.correct, total: v.total }))
+    .sort((x, y) => y.correct - x.correct || y.total - x.total || x.name.localeCompare(y.name));
+}
+
 // standings table for a set of teamIds across a set of matches
 // returns sorted rows: { teamId, played, won, lost, pts, rf, ra, diff }
 function computeStandings(teamIds, matches, overrides) {
@@ -349,13 +379,28 @@ function TTeamChip({ team, onClick, active, sub }) {
 }
 
 // editable score row for a single match
-function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTime }) {
+function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTime, onVote, predictorName, savePredictorName }) {
   const a = teamOf(match.teamA), b = teamOf(match.teamB);
   const bo = match.bo || 1;
   const mapsNeeded = bo === 3 ? 3 : 1;
   const winA = match.done && match.winner === match.teamA;
   const winB = match.done && match.winner === match.teamB;
   const bye = match.teamB == null && match.teamA != null;
+  // crowd poll — this person's pick is keyed by their predictor name, so it's consistent everywhere
+  const myPick = predictorName ? (match.voters?.[predictorName] || null) : null;
+  const va = match.votes?.a || 0, vb = match.votes?.b || 0, vtot = va + vb;
+  const pctA = vtot ? Math.round((va / vtot) * 100) : 50;
+  const pctB = vtot ? 100 - pctA : 50;
+  const castVote = (side) => {
+    if (!onVote || match.done || !a || !b) return;
+    if (!predictorName) {
+      // no name yet — send them to the one-time name banner at the top instead of prompting per match
+      const el = document.getElementById("predict-identity");
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("identity-flash"); setTimeout(() => el.classList.remove("identity-flash"), 1200); }
+      return;
+    }
+    onVote(locator, side, predictorName);
+  };
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3.5" style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(120,150,220,0.14)", clipPath: "polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px))" }}>
       <div className="flex items-center justify-between gap-2">
@@ -386,6 +431,49 @@ function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTi
           )}
         </div>
       )}
+      {/* crowd prediction poll — clear call to action; results reveal after you pick */}
+      {!bye && a && b && (
+        <div className="flex flex-col gap-2 mt-1 pt-2.5" style={{ borderTop: "1px dashed rgba(120,150,220,0.18)" }}>
+          <div className="flex items-center justify-between">
+            <span className="uppercase tracking-widest font-bold" style={{ fontSize: 11, color: match.done ? "rgba(160,190,255,0.5)" : myPick ? "rgba(160,190,255,0.55)" : "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>
+              {match.done ? "Final prediction" : myPick ? "✓ Your pick is in" : "◆ Predict the winner"}{predictorName && (myPick || match.done) ? <span style={{ color: "rgba(160,190,255,0.35)", fontWeight: 400 }}> · {predictorName}</span> : ""}
+            </span>
+            <span className="uppercase tracking-widest" style={{ fontSize: 10, color: "rgba(160,190,255,0.4)", fontFamily: "'Rajdhani',sans-serif" }}>{vtot} {vtot === 1 ? "vote" : "votes"}</span>
+          </div>
+
+          {!myPick && !match.done && (
+            <p className="text-center uppercase tracking-widest" style={{ fontSize: 10, color: "rgba(160,190,255,0.45)", fontFamily: "'Rajdhani',sans-serif" }}>Tap a team below to cast your prediction</p>
+          )}
+
+          {/* split bar — only meaningful once this person has picked (or match is done) */}
+          {(myPick || match.done) && (
+            <div className="flex w-full overflow-hidden" style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,0.05)" }}>
+              <div style={{ width: pctA + "%", background: a.hue, transition: "width .35s ease", opacity: 0.85 }} />
+              <div style={{ width: pctB + "%", background: b.hue, transition: "width .35s ease", opacity: 0.85 }} />
+            </div>
+          )}
+
+          <div className="flex items-stretch gap-2.5">
+            <button disabled={match.done} onClick={() => castVote("a")} className={"vote-btn flex-1 flex items-center justify-center gap-2 px-3 py-2.5" + (!myPick && !match.done ? " vote-btn-live" : "")}
+              style={{ cursor: match.done ? "default" : "pointer", background: myPick === "a" ? a.hue + "2e" : "rgba(255,255,255,0.035)", border: `1.5px solid ${myPick === "a" ? a.hue : a.hue + "55"}`, clipPath: "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))" }}>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: a.hue, boxShadow: myPick === "a" ? `0 0 8px ${a.hue}` : "none" }} />
+              <span className="uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", fontWeight: 700, fontSize: 13, color: a.hue }}>{a.name.split(" ")[0]}</span>
+              {(myPick || match.done)
+                ? <span className="ml-auto" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: "#ecf3ff" }}>{myPick === "a" ? "✓ " : ""}{pctA}%</span>
+                : <span className="ml-auto uppercase tracking-widest" style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: a.hue, opacity: 0.75 }}>Pick →</span>}
+            </button>
+            <button disabled={match.done} onClick={() => castVote("b")} className={"vote-btn flex-1 flex items-center justify-center gap-2 px-3 py-2.5" + (!myPick && !match.done ? " vote-btn-live" : "")}
+              style={{ cursor: match.done ? "default" : "pointer", background: myPick === "b" ? b.hue + "2e" : "rgba(255,255,255,0.035)", border: `1.5px solid ${myPick === "b" ? b.hue : b.hue + "55"}`, clipPath: "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))" }}>
+              {(myPick || match.done)
+                ? <span className="mr-auto" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: "#ecf3ff" }}>{pctB}%{myPick === "b" ? " ✓" : ""}</span>
+                : <span className="mr-auto uppercase tracking-widest" style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: b.hue, opacity: 0.75 }}>← Pick</span>}
+              <span className="uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", fontWeight: 700, fontSize: 13, color: b.hue }}>{b.name.split(" ")[0]}</span>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: b.hue, boxShadow: myPick === "b" ? `0 0 8px ${b.hue}` : "none" }} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {!bye && (
         <div className="flex items-center justify-center gap-2.5 flex-wrap">
           {Array.from({ length: mapsNeeded }).map((_, mi) => {
@@ -607,6 +695,10 @@ function TChampion({ team }) {
 // ── main tournament view ──
 function TournamentView({ state, isAdmin, teamOf, actions }) {
   const t = state.tournament;
+  const [predictorName, setPredictorName] = useState(() => { try { return localStorage.getItem("volt-predictor-name") || ""; } catch { return ""; } });
+  const savePredictorName = (n) => { const v = (n || "").trim().slice(0, 24); setPredictorName(v); try { localStorage.setItem("volt-predictor-name", v); } catch {} };
+  const [nameEditing, setNameEditing] = useState(false);
+  const [nameDraftTop, setNameDraftTop] = useState("");
   const [draftFormat, setDraftFormat] = useState("group");
   const [draftBo, setDraftBo] = useState("bo1");
   const [draftGroups, setDraftGroups] = useState(2);
@@ -815,7 +907,7 @@ function TournamentView({ state, isAdmin, teamOf, actions }) {
   }
 
   // ── LIVE STATE: locked, scores being entered ──
-  const A = { onSetMap: actions.tSetMap, onSetBo: actions.tSetBo, onSetTime: actions.tSetTime };
+  const A = { onSetMap: actions.tSetMap, onSetBo: actions.tSetBo, onSetTime: actions.tSetTime, onVote: actions.tVote, predictorName, savePredictorName };
   let champion = null;
   if (t.format === "single" && t.rounds?.length) { const fm = t.rounds[t.rounds.length - 1][0]; if (fm?.done) champion = teamOf(fm.winner); }
   if (t.format === "final" || (t.format === "group" && t.final?.done)) champion = teamOf(t.final.winner);
@@ -826,6 +918,29 @@ function TournamentView({ state, isAdmin, teamOf, actions }) {
       <div className="flex items-center justify-center gap-3 mb-7 flex-wrap">
         <span className="text-xs uppercase tracking-widest px-3 py-1.5" style={{ color: "#7da6ff", fontFamily: "'IBM Plex Mono',monospace", border: "1px solid rgba(61,123,255,0.3)", background: "rgba(61,123,255,0.06)" }}>{"BO" + t.bo} default</span>
         {isAdmin && <button onClick={actions.armTClear} className="text-xs uppercase tracking-widest px-3 py-1.5" style={{ color: actions.tClearArmed ? "#ffd2d7" : "rgba(255,120,135,0.8)", fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${actions.tClearArmed ? "#ff4655" : "rgba(255,120,135,0.3)"}`, background: actions.tClearArmed ? "rgba(255,70,85,0.18)" : "transparent" }}>{actions.tClearArmed ? "Click again to confirm" : "Clear tournament"}</button>}
+      </div>
+
+      {/* prediction identity — set your name once; every match vote then uses it silently */}
+      <div id="predict-identity" className="flex items-center justify-center mb-7">
+        {predictorName && !nameEditing ? (
+          <div className="flex items-center gap-3 px-4 py-2.5" style={{ background: "rgba(61,123,255,0.07)", border: "1px solid rgba(61,123,255,0.3)", clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px))" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7da6ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+            <span className="uppercase tracking-widest" style={{ fontSize: 12, color: "rgba(200,215,255,0.6)", fontFamily: "'Rajdhani',sans-serif" }}>Predicting as</span>
+            <span className="uppercase font-bold tracking-wide" style={{ fontSize: 15, color: "#ecf3ff", fontFamily: "'Rajdhani',sans-serif" }}>{predictorName}</span>
+            <button onClick={() => { setNameDraftTop(predictorName); setNameEditing(true); }} className="uppercase tracking-widest" style={{ fontSize: 10, color: "rgba(125,166,255,0.75)", fontFamily: "'Rajdhani',sans-serif", border: "1px solid rgba(61,123,255,0.35)", background: "rgba(61,123,255,0.06)", padding: "3px 9px" }}>Change</button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-2 px-5 py-3.5 max-w-md w-full" style={{ background: "rgba(61,123,255,0.07)", border: "1px solid rgba(61,123,255,0.35)", clipPath: "polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))" }}>
+            <span className="uppercase tracking-widest font-bold" style={{ fontSize: 12, color: "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>◆ Enter your name to predict matches</span>
+            <div className="flex items-center gap-2 w-full">
+              <input autoFocus={nameEditing} value={nameDraftTop} onChange={(e) => setNameDraftTop(e.target.value)} maxLength={24}
+                onKeyDown={(e) => { if (e.key === "Enter" && nameDraftTop.trim()) { savePredictorName(nameDraftTop); setNameEditing(false); } if (e.key === "Escape") setNameEditing(false); }}
+                placeholder="Your name" className="flex-1 px-3 py-2 outline-none" style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 14, background: "rgba(7,12,22,0.9)", border: "1px solid rgba(61,123,255,0.5)", color: "#ecf3ff", textAlign: "center" }} />
+              <button onClick={() => { if (nameDraftTop.trim()) { savePredictorName(nameDraftTop); setNameEditing(false); } }} className="px-4 py-2 uppercase tracking-widest" style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "#0a0d18", background: "#3d7bff", border: "none" }}>Set</button>
+            </div>
+            <span className="uppercase tracking-widest" style={{ fontSize: 9, color: "rgba(160,190,255,0.4)", fontFamily: "'Rajdhani',sans-serif" }}>One time — applies to all your match predictions</span>
+          </div>
+        )}
       </div>
 
       {champion && <div className="mb-8"><TChampion team={champion} /></div>}
@@ -3127,6 +3242,20 @@ export default function App() {
     return s;
   }, true, true);
 
+  // crowd prediction poll — named, one pick per person (by name), stored as { name: side }.
+  // re-voting overwrites that person's pick. counts are derived from the voters map.
+  const tVote = (locator, side, name) => mutate((s) => {
+    const t = s.tournament; if (!t) return null;
+    const m = findMatch(t, locator); if (!m || m.done) return null; // no voting once a match is decided
+    const nm = (name || "").trim(); if (!nm) return null;
+    if (!m.voters || typeof m.voters !== "object") m.voters = {};
+    m.voters[nm] = side; // name -> "a" | "b"
+    // keep legacy count fields in sync so any old reader still works
+    const vals = Object.values(m.voters);
+    m.votes = { a: vals.filter((v) => v === "a").length, b: vals.filter((v) => v === "b").length };
+    return s;
+  }, true, true);
+
   const tOverride = (teamId, patch) => mutate((s) => {
     const t = s.tournament; if (!t) return null;
     if (!t.overrides) t.overrides = {};
@@ -3260,6 +3389,13 @@ export default function App() {
         cursor: pointer; opacity: 0.85;
       }
       .hud-datetime::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+      .vote-btn { transition: transform .12s ease, background .18s ease, box-shadow .18s ease; }
+      .vote-btn:not(:disabled):hover { transform: translateY(-1px); background: rgba(255,255,255,0.08) !important; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+      .vote-btn:not(:disabled):active { transform: translateY(0); }
+      @keyframes votepulse { 0%,100% { box-shadow: 0 0 0 rgba(125,166,255,0); } 50% { box-shadow: 0 0 13px rgba(125,166,255,0.22); } }
+      .vote-btn-live { animation: votepulse 2.4s ease-in-out infinite; }
+      @keyframes idflash { 0%,100% { box-shadow: 0 0 0 rgba(125,166,255,0); } 30%,60% { box-shadow: 0 0 0 3px rgba(125,166,255,0.5), 0 0 22px rgba(125,166,255,0.4); } }
+      .identity-flash { animation: idflash 1.2s ease-in-out; }
       .wr-slider { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 999px; outline: none; cursor: pointer;
         background: linear-gradient(90deg, var(--wr-hue) 0%, var(--wr-hue) var(--wr-pct), rgba(255,255,255,0.10) var(--wr-pct), rgba(255,255,255,0.10) 100%); }
       .wr-slider:disabled { cursor: default; }
@@ -3292,8 +3428,15 @@ export default function App() {
   const leaderTeam = block?.leaderId ? state.teams.find((t) => t.id === block.leaderId) : null;
   const pool = state.players.filter((p) => p.status === "pool");
   const sold = state.players.filter((p) => p.status === "sold").sort((a, b) => b.soldPrice - a.soldPrice);
+  const topPredictors = predictorScores(state.tournament).filter((p) => p.total > 0).slice(0, 5);
   const spinLive = state.spin && Date.now() < state.spin.startTs + state.spin.duration + REVEAL_MS;
   const teamOf = (id) => state.teams.find((t) => t.id === id);
+  // top performers — same ranking as the Leaderboard page (avg ACS, then K/D, then kills); only rated players
+  const topPerformers = state.players
+    .map((p) => ({ p, s: aggStats(p) }))
+    .filter((r) => r.s.games > 0)
+    .sort((A, B) => B.s.acs - A.s.acs || B.s.kd - A.s.kd || B.s.k - A.s.k)
+    .slice(0, 5);
 
   /* ── top nav (transparent, hero-themed) ── */
   const TopNav = (
@@ -3602,6 +3745,82 @@ export default function App() {
       </div>
 
       {TickerTape}
+
+      {/* lobby leaderboard widgets — match performers + fan predictors (always shown) */}
+      {true && (
+        <div className="page-wrap pt-8">
+          <div className="grid lg:grid-cols-2 gap-5 max-w-5xl mx-auto items-start">
+
+            {/* top performers — condensed view of the Leaderboard page */}
+            {true && (
+              <div className="relative p-5" style={{ background: "linear-gradient(160deg, rgba(61,123,255,0.07), rgba(10,15,28,0.5))", border: "1px solid rgba(61,123,255,0.28)", clipPath: "polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px))", backdropFilter: "blur(10px)" }}>
+                <span className="absolute left-0 top-0" style={{ width: 11, height: 11, borderLeft: "2px solid #3d7bff", borderTop: "2px solid #3d7bff" }} />
+                <div className="flex items-center justify-between mb-1">
+                  <p className="uppercase font-bold tracking-widest" style={{ color: "#7da6ff", fontFamily: "'Rajdhani',sans-serif", fontSize: 15 }}>≣ Top Performers</p>
+                  <button onClick={() => setView("leaderboard")} className="uppercase tracking-widest" style={{ fontSize: 10, color: "rgba(125,166,255,0.7)", fontFamily: "'Rajdhani',sans-serif", border: "1px solid rgba(61,123,255,0.3)", background: "rgba(61,123,255,0.06)", padding: "3px 8px" }}>Full board →</button>
+                </div>
+                <p className="uppercase tracking-widest mb-4" style={{ color: "rgba(125,166,255,0.45)", fontFamily: "'Rajdhani',sans-serif", fontSize: 10 }}>Ranked by average ACS</p>
+                {topPerformers.length === 0 ? (
+                  <div className="px-3 py-6 text-center" style={{ background: "rgba(255,255,255,0.02)", border: "1px dashed rgba(120,150,220,0.18)" }}>
+                    <p className="uppercase tracking-widest mb-1" style={{ fontSize: 11, fontWeight: 700, color: "rgba(125,166,255,0.6)", fontFamily: "'Rajdhani',sans-serif" }}>Nothing to show yet</p>
+                    <p style={{ fontSize: 12, color: "rgba(200,215,255,0.4)" }}>Wait for matches to conclude — the board fills in as games are played.</p>
+                  </div>
+                ) : (
+                <div className="flex flex-col gap-1.5">
+                  {topPerformers.map(({ p, s }, i) => {
+                    const medal = i === 0 ? "#f5c453" : i === 1 ? "#c8d2e0" : i === 2 ? "#cd7f47" : "rgba(160,190,255,0.5)";
+                    const tm = teamOf(p.soldTo);
+                    return (
+                      <div key={p.id} className="flex items-center gap-3 px-3 py-2" style={{ background: i < 3 ? medal + "12" : "rgba(255,255,255,0.025)", border: `1px solid ${i < 3 ? medal + "40" : "rgba(120,150,220,0.12)"}` }}>
+                        <span className="font-bold shrink-0 text-center" style={{ width: 20, fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, color: medal }}>{i + 1}</span>
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tm ? tm.hue : "rgba(120,150,220,0.4)" }} />
+                        <span className="flex flex-col min-w-0 flex-1">
+                          <span className="uppercase font-bold truncate leading-tight" style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 14, color: "#ecf3ff" }}>{p.name}</span>
+                          <span className="uppercase truncate leading-tight" style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 10, color: tm ? tm.hue : "rgba(200,215,255,0.4)" }}>{tm ? tm.name : "—"}</span>
+                        </span>
+                        <span className="shrink-0 text-right" style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 10, color: "rgba(200,215,255,0.4)" }}>{s.k}/{s.d}/{s.a}</span>
+                        <span className="shrink-0 font-bold text-right" style={{ width: 52, fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, color: "#7da6ff" }}>{s.acs}<span style={{ fontSize: 9, color: "rgba(200,215,255,0.35)" }}> ACS</span></span>
+                      </div>
+                    );
+                  })}
+                </div>
+                )}
+              </div>
+            )}
+
+            {/* top predictors — fan prediction leaderboard, ranked by correct picks */}
+            {true && (
+              <div className="relative p-5" style={{ background: "linear-gradient(160deg, rgba(245,196,83,0.06), rgba(10,15,28,0.5))", border: "1px solid rgba(245,196,83,0.28)", clipPath: "polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px))", backdropFilter: "blur(10px)" }}>
+                <span className="absolute left-0 top-0" style={{ width: 11, height: 11, borderLeft: "2px solid #f5c453", borderTop: "2px solid #f5c453" }} />
+                <p className="uppercase font-bold tracking-widest mb-1 flex items-center gap-2" style={{ color: "#f5c453", fontFamily: "'Rajdhani',sans-serif", fontSize: 15 }}>★ Top Predictors</p>
+                <p className="uppercase tracking-widest mb-4" style={{ color: "rgba(245,196,83,0.45)", fontFamily: "'Rajdhani',sans-serif", fontSize: 10 }}>Ranked by correct match calls</p>
+                {topPredictors.length === 0 ? (
+                  <div className="px-3 py-6 text-center" style={{ background: "rgba(255,255,255,0.02)", border: "1px dashed rgba(245,196,83,0.22)" }}>
+                    <p className="uppercase tracking-widest mb-1" style={{ fontSize: 11, fontWeight: 700, color: "rgba(245,196,83,0.6)", fontFamily: "'Rajdhani',sans-serif" }}>Nothing to show yet</p>
+                    <p style={{ fontSize: 12, color: "rgba(200,215,255,0.4)" }}>Wait for matches to conclude — predict winners during the games to climb this board.</p>
+                  </div>
+                ) : (
+                <div className="flex flex-col gap-1.5">
+                  {topPredictors.map((p, i) => {
+                    const medal = i === 0 ? "#f5c453" : i === 1 ? "#c8d2e0" : i === 2 ? "#cd7f47" : "rgba(160,190,255,0.5)";
+                    const acc = p.total ? Math.round((p.correct / p.total) * 100) : 0;
+                    return (
+                      <div key={p.name} className="flex items-center gap-3 px-3 py-2" style={{ background: i < 3 ? medal + "14" : "rgba(255,255,255,0.025)", border: `1px solid ${i < 3 ? medal + "44" : "rgba(120,150,220,0.12)"}` }}>
+                        <span className="font-bold shrink-0 text-center" style={{ width: 20, fontFamily: "'IBM Plex Mono',monospace", fontSize: 15, color: medal }}>{i + 1}</span>
+                        <span className="uppercase font-bold truncate flex-1" style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 14, color: "#ecf3ff" }}>{p.name}</span>
+                        <span className="shrink-0" style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 11, color: "rgba(200,215,255,0.4)" }}>{acc}% acc</span>
+                        <span className="shrink-0 font-bold" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 14, color: medal }}>{p.correct}<span style={{ color: "rgba(200,215,255,0.35)", fontSize: 11 }}>/{p.total}</span></span>
+                      </div>
+                    );
+                  })}
+                </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
 
       {/* rule summary */}
       <div className="page-wrap py-8">
@@ -4014,7 +4233,7 @@ export default function App() {
       state={state}
       isAdmin={isAdmin}
       teamOf={teamOf}
-      actions={{ tCreate, tClear, armTClear, tClearArmed, tAssign, tSetSlot, tSetSlotCount, tLock, tSetMap, tSetBo, tSetTime, tOverride }}
+      actions={{ tCreate, tClear, armTClear, tClearArmed, tAssign, tSetSlot, tSetSlotCount, tLock, tSetMap, tSetBo, tSetTime, tVote, tOverride }}
     />
   );
 
