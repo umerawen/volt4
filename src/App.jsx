@@ -257,6 +257,7 @@ function findMatch(t, loc) {
   if (loc.kind === "group") return (t.matches?.[loc.groupId] || []).find((m) => m.id === loc.matchId) || null;
   if (loc.kind === "rr") return (t.matches || []).find((m) => m.id === loc.matchId) || null;
   if (loc.kind === "final") return t.final || null;
+  if (loc.kind === "semi") return t.semis?.[loc.idx] || null;
   if (loc.kind === "elim") return t.rounds?.[loc.round]?.[loc.idx] || null;
   return null;
 }
@@ -837,7 +838,7 @@ function TournamentView({ state, isAdmin, teamOf, actions }) {
               <div key={g.id} className="flex flex-col gap-4">
                 <TPanel>
                   <p className="uppercase text-base font-bold tracking-widest mb-3" style={{ color: "#aec6ff", fontFamily: "'Rajdhani',sans-serif" }}>{g.name} · Standings</p>
-                  <TStandings teamIds={g.teamIds} matches={t.matches[g.id] || []} overrides={t.overrides} teamOf={teamOf} advance={1} />
+                  <TStandings teamIds={g.teamIds} matches={t.matches[g.id] || []} overrides={t.overrides} teamOf={teamOf} advance={2} />
                 </TPanel>
                 <TPanel>
                   <p className="uppercase text-base font-bold tracking-widest mb-3" style={{ color: "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>{g.name} · Matches</p>
@@ -850,6 +851,24 @@ function TournamentView({ state, isAdmin, teamOf, actions }) {
               </div>
             ))}
           </div>
+          {/* the playoffs — semifinals (top 2 of each group) then the final */}
+          <TPanel hue="#7da6ff" className="mb-6">
+            <p className="uppercase text-lg font-bold tracking-widest mb-1 text-center" style={{ color: "#9fc0ff", fontFamily: "'Rajdhani',sans-serif" }}>Semifinals</p>
+            <p className="text-center text-[11px] uppercase tracking-widest mb-4" style={{ color: "rgba(160,190,255,0.5)", fontFamily: "'Rajdhani',sans-serif" }}>Top 2 of each group · A1 vs B2 — B1 vs A2</p>
+            {t.semis ? (
+              <div className="grid md:grid-cols-2 gap-4 max-w-3xl mx-auto">
+                {t.semis.map((m, i) => (
+                  <div key={m.id} className="flex flex-col gap-2">
+                    <p className="text-center text-xs uppercase tracking-widest" style={{ color: "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>{"Semifinal " + (i + 1)}</p>
+                    <TMatchRow match={m} locator={{ kind: "semi", idx: i }} teamOf={teamOf} isAdmin={isAdmin} {...A} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center text-sm" style={{ color: "rgba(200,215,255,0.45)" }}>Awaiting group results — complete every group match to seed the semifinals.</p>
+            )}
+          </TPanel>
+
           {/* the final */}
           <TPanel hue="#ffd166">
             <p className="uppercase text-lg font-bold tracking-widest mb-3 text-center" style={{ color: "#ffd166", fontFamily: "'Rajdhani',sans-serif" }}>★ Grand Final ★</p>
@@ -858,7 +877,7 @@ function TournamentView({ state, isAdmin, teamOf, actions }) {
                 <TMatchRow match={t.final} locator={{ kind: "final" }} teamOf={teamOf} isAdmin={isAdmin} {...A} />
               </div>
             ) : (
-              <p className="text-center text-sm" style={{ color: "rgba(200,215,255,0.45)" }}>Awaiting both group winners — complete every group match to set the final.</p>
+              <p className="text-center text-sm" style={{ color: "rgba(200,215,255,0.45)" }}>Awaiting both semifinal winners — the final locks in once the semis are decided.</p>
             )}
           </TPanel>
         </>
@@ -3008,7 +3027,8 @@ export default function App() {
       t.groups = Array.from({ length: g }, (_, i) => ({ id: "g" + i, name: "Group " + String.fromCharCode(65 + i), teamIds: [] }));
       t.matches = {}; // per-group matches generated when groups are locked
       t.locked = false;
-      t.final = null; // { teamA, teamB, bo, maps, done, winner } once groups complete
+      t.semis = null; // [SF1, SF2] built from top 2 of each group once the group stage ends
+      t.final = null; // { teamA, teamB, bo, maps, done, winner } once both semis complete
     } else if (format === "roundrobin") {
       t.teamIds = []; // commissioner adds all participating teams
       t.matches = [];
@@ -3115,16 +3135,42 @@ export default function App() {
     return s;
   }, true, true);
 
-  // build the group-stage final from current group winners (top of each group)
+  // build semifinals (top 2 of each group) then the grand final from semi winners.
+  // seeding is cross-bracket: SF1 = A1 vs B2, SF2 = B1 vs A2.
   function syncFinal(s, t) {
-    const winners = t.groups.map((g) => {
+    // standings per group (only count a group "done" when all its matches are done)
+    const seeds = t.groups.map((g) => {
       const rows = computeStandings(g.teamIds, t.matches[g.id] || [], t.overrides);
-      const allDone = (t.matches[g.id] || []).every((m) => m.done);
-      return allDone && rows.length ? rows[0].teamId : null;
+      const allDone = (t.matches[g.id] || []).length > 0 && (t.matches[g.id] || []).every((m) => m.done);
+      return { first: allDone && rows.length ? rows[0].teamId : null, second: allDone && rows.length > 1 ? rows[1].teamId : null };
     });
-    if (winners.length >= 2 && winners[0] && winners[1]) {
-      if (!t.final) t.final = { id: "final", teamA: winners[0], teamB: winners[1], bo: t.bo, maps: [], done: false, winner: null };
-      else if (!t.final.done) { t.final.teamA = winners[0]; t.final.teamB = winners[1]; }
+
+    // need exactly two groups, both fully decided with a clear top two
+    const ready = t.groups.length >= 2 && seeds[0].first && seeds[0].second && seeds[1].first && seeds[1].second;
+
+    if (!ready) {
+      // groups not finished — tear down playoffs only if they haven't been played yet
+      if (t.semis && !t.semis.some((m) => m.done)) t.semis = null;
+      if (t.final && !t.final.done) t.final = null;
+      return;
+    }
+
+    const a1 = seeds[0].first, a2 = seeds[0].second, b1 = seeds[1].first, b2 = seeds[1].second;
+    const pairs = [[a1, b2], [b1, a2]]; // SF1, SF2
+
+    if (!t.semis) {
+      t.semis = pairs.map((p, i) => ({ id: "semi" + (i + 1), teamA: p[0], teamB: p[1], bo: t.bo, maps: [], done: false, winner: null, scheduledAt: null }));
+    } else {
+      // refresh seeding for any semi that hasn't been played yet
+      t.semis.forEach((m, i) => { if (!m.done) { m.teamA = pairs[i][0]; m.teamB = pairs[i][1]; } });
+    }
+    t.semis.forEach(resolveMatch);
+
+    // final = winners of the two semis, once both are decided
+    const sw = t.semis.map((m) => (m.done ? m.winner : null));
+    if (sw[0] && sw[1]) {
+      if (!t.final) t.final = { id: "final", teamA: sw[0], teamB: sw[1], bo: t.bo, maps: [], done: false, winner: null, scheduledAt: null };
+      else if (!t.final.done) { t.final.teamA = sw[0]; t.final.teamB = sw[1]; }
     } else if (t.final && !t.final.done) {
       t.final = null;
     }
@@ -3177,7 +3223,7 @@ export default function App() {
       @keyframes burst { 0% { transform: scale(1); opacity: 0.9; } 100% { transform: scale(1.18); opacity: 0; } }
       .float-soft { animation: floaty 7s ease-in-out infinite; }
       @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-      .marquee { display: inline-flex; white-space: nowrap; animation: marq 28s linear infinite; }
+      .marquee { display: inline-flex; white-space: nowrap; animation: marq 55s linear infinite; }
       @keyframes marq { from { transform: translateX(0); } to { transform: translateX(-50%); } }
       .cd-pulse { animation: cdpulse 1.6s ease-in-out infinite; }
       @keyframes cdpulse { 0%,100% { opacity: 1; box-shadow: 0 0 6px currentColor; } 50% { opacity: 0.35; box-shadow: 0 0 2px currentColor; } }
@@ -3373,10 +3419,26 @@ export default function App() {
     </header>
   );
 
-  /* global ticker tape (lobby + reused) */
-  const tickerItems = sold.length
-    ? sold.map((p) => `${teamOf(p.soldTo)?.name ?? "?"} secured ${p.name} (${p.rank}) for ${fmt(p.soldPrice)}`)
-    : ["No players sold yet — the board is wide open", "Spin the wheel to nominate the first name", `${state.teams.length} captains · $10,000 each · 4 slots to fill`];
+  /* global ticker tape (lobby + reused) — curated storylines, not a per-sale dump */
+  const tickerItems = (() => {
+    if (!sold.length) return ["No players sold yet — the board is wide open", "Spin the wheel to nominate the first name", `${state.teams.length} captains · $10,000 each · 4 slots to fill`];
+    const items = [];
+    // record sale
+    const rec = sold.reduce((b, p) => (!b || (p.soldPrice || 0) > (b.soldPrice || 0) ? p : b), null);
+    if (rec) items.push(`Record signing — ${rec.name} to ${teamOf(rec.soldTo)?.name ?? "?"} for ${fmt(rec.soldPrice)}`);
+    // most contested (needs bidCount)
+    const fought = sold.reduce((b, p) => ((p.bidCount || 0) > (b?.bidCount || 0) ? p : b), null);
+    if (fought && (fought.bidCount || 0) > 1) items.push(`Bidding war — ${fought.name} drew ${fought.bidCount} bids before ${teamOf(fought.soldTo)?.name ?? "?"} closed it`);
+    // completed rosters
+    state.teams.filter((t) => t.roster.length >= 4).forEach((t) => items.push(`${t.captain || t.name}'s roster is locked — 4/4 secured`));
+    // captains still with the most money to spend (top 2)
+    [...state.teams].filter((t) => t.roster.length < 4).sort((a, b) => b.budget - a.budget).slice(0, 2)
+      .forEach((t) => items.push(`${t.captain || t.name} still holds ${fmt(t.budget)} · ${4 - t.roster.length} slot${4 - t.roster.length === 1 ? "" : "s"} open`));
+    // running tally
+    const spent = sold.reduce((s, p) => s + (p.soldPrice || 0), 0);
+    items.push(`${sold.length} players sold · ${fmt(spent)} spent across the room`);
+    return items;
+  })();
   const TickerTape = (
     <div className="overflow-hidden py-2" style={{ borderTop: "1px solid rgba(61,123,255,0.18)", borderBottom: "1px solid rgba(61,123,255,0.18)", background: "linear-gradient(180deg, rgba(8,14,28,0.6), rgba(5,9,18,0.6))" }}>
       <div className="marquee">
