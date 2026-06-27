@@ -388,11 +388,19 @@ function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTi
   const bye = match.teamB == null && match.teamA != null;
   // crowd poll — this person's pick is keyed by their predictor name, so it's consistent everywhere
   const myPick = predictorName ? (match.voters?.[predictorName] || null) : null;
+  // predictions lock at kickoff: when the match is done, or once its scheduled start time has arrived
+  const predLocked = match.done || (match.scheduledAt != null && Date.now() >= match.scheduledAt);
   const va = match.votes?.a || 0, vb = match.votes?.b || 0, vtot = va + vb;
   const pctA = vtot ? Math.round((va / vtot) * 100) : 50;
   const pctB = vtot ? 100 - pctA : 50;
+  const [expanded, setExpanded] = useState(false); // show the big vote buttons
+  const [showVoters, setShowVoters] = useState(false); // show the named voter breakdown
+  const votersA = match.voters ? Object.keys(match.voters).filter((n) => match.voters[n] === "a") : [];
+  const votersB = match.voters ? Object.keys(match.voters).filter((n) => match.voters[n] === "b") : [];
+  // big buttons show when: not yet voted, or user tapped "Change" (and match not done)
+  const showButtons = !predLocked && (!myPick || expanded);
   const castVote = (side) => {
-    if (!onVote || match.done || !a || !b) return;
+    if (!onVote || predLocked || !a || !b) return;
     if (!predictorName) {
       // no name yet — send them to the one-time name banner at the top instead of prompting per match
       const el = document.getElementById("predict-identity");
@@ -400,6 +408,7 @@ function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTi
       return;
     }
     onVote(locator, side, predictorName);
+    setExpanded(false); // collapse back to compact view after voting
   };
   return (
     <div className="flex flex-col gap-2.5 px-4 py-3.5" style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(120,150,220,0.14)", clipPath: "polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px))" }}>
@@ -431,46 +440,87 @@ function TMatchRow({ match, locator, teamOf, isAdmin, onSetMap, onSetBo, onSetTi
           )}
         </div>
       )}
-      {/* crowd prediction poll — clear call to action; results reveal after you pick */}
+      {/* crowd prediction poll — compact after voting; tap votes to see who picked what */}
       {!bye && a && b && (
         <div className="flex flex-col gap-2 mt-1 pt-2.5" style={{ borderTop: "1px dashed rgba(120,150,220,0.18)" }}>
-          <div className="flex items-center justify-between">
-            <span className="uppercase tracking-widest font-bold" style={{ fontSize: 11, color: match.done ? "rgba(160,190,255,0.5)" : myPick ? "rgba(160,190,255,0.55)" : "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>
-              {match.done ? "Final prediction" : myPick ? "✓ Your pick is in" : "◆ Predict the winner"}{predictorName && (myPick || match.done) ? <span style={{ color: "rgba(160,190,255,0.35)", fontWeight: 400 }}> · {predictorName}</span> : ""}
+          <div className="flex items-center justify-between gap-2">
+            <span className="uppercase tracking-widest font-bold" style={{ fontSize: 11, color: predLocked ? "rgba(160,190,255,0.5)" : myPick ? "rgba(160,190,255,0.55)" : "#7da6ff", fontFamily: "'Rajdhani',sans-serif" }}>
+              {match.done ? "Final prediction" : predLocked ? "🔒 Predictions locked" : myPick ? "✓ Your pick is in" : "◆ Predict the winner"}{predictorName && (myPick || predLocked) ? <span style={{ color: "rgba(160,190,255,0.35)", fontWeight: 400 }}> · {predictorName}</span> : ""}
             </span>
-            <span className="uppercase tracking-widest" style={{ fontSize: 10, color: "rgba(160,190,255,0.4)", fontFamily: "'Rajdhani',sans-serif" }}>{vtot} {vtot === 1 ? "vote" : "votes"}</span>
+            <button onClick={() => vtot > 0 && setShowVoters((v) => !v)} className="uppercase tracking-widest flex items-center gap-1" style={{ fontSize: 10, color: vtot > 0 ? "rgba(125,166,255,0.7)" : "rgba(160,190,255,0.4)", fontFamily: "'Rajdhani',sans-serif", cursor: vtot > 0 ? "pointer" : "default", background: "none", border: "none" }}>
+              {vtot} {vtot === 1 ? "vote" : "votes"}{vtot > 0 && <span style={{ fontSize: 8 }}>{showVoters ? "▲" : "▼"}</span>}
+            </button>
           </div>
 
-          {!myPick && !match.done && (
+          {/* who voted for whom */}
+          {showVoters && vtot > 0 && (
+            <div className="flex gap-2" style={{ fontSize: 11 }}>
+              <div className="flex-1 px-2.5 py-2" style={{ background: a.hue + "10", border: `1px solid ${a.hue}33` }}>
+                <p className="uppercase tracking-widest mb-1" style={{ fontSize: 9, color: a.hue, fontFamily: "'Rajdhani',sans-serif", fontWeight: 700 }}>{a.name.split(" ")[0]} · {votersA.length}</p>
+                <p style={{ color: "rgba(220,230,255,0.7)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>{votersA.length ? votersA.join(", ") : "—"}</p>
+              </div>
+              <div className="flex-1 px-2.5 py-2" style={{ background: b.hue + "10", border: `1px solid ${b.hue}33` }}>
+                <p className="uppercase tracking-widest mb-1 text-right" style={{ fontSize: 9, color: b.hue, fontFamily: "'Rajdhani',sans-serif", fontWeight: 700 }}>{b.name.split(" ")[0]} · {votersB.length}</p>
+                <p className="text-right" style={{ color: "rgba(220,230,255,0.7)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>{votersB.length ? votersB.join(", ") : "—"}</p>
+              </div>
+            </div>
+          )}
+
+          {!myPick && !predLocked && (
             <p className="text-center uppercase tracking-widest" style={{ fontSize: 10, color: "rgba(160,190,255,0.45)", fontFamily: "'Rajdhani',sans-serif" }}>Tap a team below to cast your prediction</p>
           )}
 
-          {/* split bar — only meaningful once this person has picked (or match is done) */}
-          {(myPick || match.done) && (
+          {/* split bar — once this person has picked, or predictions are locked */}
+          {(myPick || predLocked) && (
             <div className="flex w-full overflow-hidden" style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,0.05)" }}>
               <div style={{ width: pctA + "%", background: a.hue, transition: "width .35s ease", opacity: 0.85 }} />
               <div style={{ width: pctB + "%", background: b.hue, transition: "width .35s ease", opacity: 0.85 }} />
             </div>
           )}
 
-          <div className="flex items-stretch gap-2.5">
-            <button disabled={match.done} onClick={() => castVote("a")} className={"vote-btn flex-1 flex items-center justify-center gap-2 px-3 py-2.5" + (!myPick && !match.done ? " vote-btn-live" : "")}
-              style={{ cursor: match.done ? "default" : "pointer", background: myPick === "a" ? a.hue + "2e" : "rgba(255,255,255,0.035)", border: `1.5px solid ${myPick === "a" ? a.hue : a.hue + "55"}`, clipPath: "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))" }}>
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: a.hue, boxShadow: myPick === "a" ? `0 0 8px ${a.hue}` : "none" }} />
-              <span className="uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", fontWeight: 700, fontSize: 13, color: a.hue }}>{a.name.split(" ")[0]}</span>
-              {(myPick || match.done)
-                ? <span className="ml-auto" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: "#ecf3ff" }}>{myPick === "a" ? "✓ " : ""}{pctA}%</span>
-                : <span className="ml-auto uppercase tracking-widest" style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: a.hue, opacity: 0.75 }}>Pick →</span>}
-            </button>
-            <button disabled={match.done} onClick={() => castVote("b")} className={"vote-btn flex-1 flex items-center justify-center gap-2 px-3 py-2.5" + (!myPick && !match.done ? " vote-btn-live" : "")}
-              style={{ cursor: match.done ? "default" : "pointer", background: myPick === "b" ? b.hue + "2e" : "rgba(255,255,255,0.035)", border: `1.5px solid ${myPick === "b" ? b.hue : b.hue + "55"}`, clipPath: "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))" }}>
-              {(myPick || match.done)
-                ? <span className="mr-auto" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: "#ecf3ff" }}>{pctB}%{myPick === "b" ? " ✓" : ""}</span>
-                : <span className="mr-auto uppercase tracking-widest" style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: b.hue, opacity: 0.75 }}>← Pick</span>}
-              <span className="uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", fontWeight: 700, fontSize: 13, color: b.hue }}>{b.name.split(" ")[0]}</span>
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: b.hue, boxShadow: myPick === "b" ? `0 0 8px ${b.hue}` : "none" }} />
-            </button>
-          </div>
+          {/* COMPACT result row — when voted and not expanded (Change hidden once locked) */}
+          {myPick && !match.done && !expanded && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center justify-between px-3 py-1.5" style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(120,150,220,0.15)" }}>
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: (myPick === "a" ? a.hue : b.hue), boxShadow: `0 0 8px ${myPick === "a" ? a.hue : b.hue}` }} />
+                  <span className="uppercase font-bold truncate" style={{ fontFamily: "'Rajdhani',sans-serif", fontSize: 12, color: (myPick === "a" ? a.hue : b.hue) }}>✓ {(myPick === "a" ? a.name : b.name).split(" ")[0]}</span>
+                </span>
+                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: "rgba(220,230,255,0.55)" }}>{a.name.split(" ")[0]} {pctA}% · {b.name.split(" ")[0]} {pctB}%</span>
+              </div>
+              {!predLocked
+                ? <button onClick={() => setExpanded(true)} className="uppercase tracking-widest shrink-0 px-3 py-1.5" style={{ fontSize: 10, fontWeight: 700, color: "#7da6ff", fontFamily: "'Rajdhani',sans-serif", border: "1px solid rgba(61,123,255,0.35)", background: "rgba(61,123,255,0.06)" }}>Change</button>
+                : <span className="uppercase tracking-widest shrink-0 px-2.5 py-1.5" style={{ fontSize: 10, fontWeight: 700, color: "rgba(160,190,255,0.45)", fontFamily: "'Rajdhani',sans-serif" }}>🔒 Locked</span>}
+            </div>
+          )}
+
+          {/* locked with no pick — let them know they missed it */}
+          {!myPick && predLocked && !match.done && (
+            <p className="text-center uppercase tracking-widest" style={{ fontSize: 10, color: "rgba(160,190,255,0.4)", fontFamily: "'Rajdhani',sans-serif" }}>Predictions closed — match underway</p>
+          )}
+
+          {/* BIG buttons — when not voted, or "Change" pressed */}
+          {showButtons && (
+            <div className="flex items-stretch gap-2.5">
+              <button onClick={() => castVote("a")} className={"vote-btn flex-1 flex items-center justify-center gap-2 px-3 py-2.5" + (!myPick ? " vote-btn-live" : "")}
+                style={{ cursor: "pointer", background: myPick === "a" ? a.hue + "2e" : "rgba(255,255,255,0.035)", border: `1.5px solid ${myPick === "a" ? a.hue : a.hue + "55"}`, clipPath: "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))" }}>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: a.hue, boxShadow: myPick === "a" ? `0 0 8px ${a.hue}` : "none" }} />
+                <span className="uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", fontWeight: 700, fontSize: 13, color: a.hue }}>{a.name.split(" ")[0]}</span>
+                {myPick
+                  ? <span className="ml-auto" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: "#ecf3ff" }}>{myPick === "a" ? "✓ " : ""}{pctA}%</span>
+                  : <span className="ml-auto uppercase tracking-widest" style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: a.hue, opacity: 0.75 }}>Pick →</span>}
+              </button>
+              <button onClick={() => castVote("b")} className={"vote-btn flex-1 flex items-center justify-center gap-2 px-3 py-2.5" + (!myPick ? " vote-btn-live" : "")}
+                style={{ cursor: "pointer", background: myPick === "b" ? b.hue + "2e" : "rgba(255,255,255,0.035)", border: `1.5px solid ${myPick === "b" ? b.hue : b.hue + "55"}`, clipPath: "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))" }}>
+                {myPick
+                  ? <span className="mr-auto" style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, fontWeight: 700, color: "#ecf3ff" }}>{pctB}%{myPick === "b" ? " ✓" : ""}</span>
+                  : <span className="mr-auto uppercase tracking-widest" style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: b.hue, opacity: 0.75 }}>← Pick</span>}
+                <span className="uppercase truncate" style={{ fontFamily: "'Rajdhani',sans-serif", fontWeight: 700, fontSize: 13, color: b.hue }}>{b.name.split(" ")[0]}</span>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: b.hue, boxShadow: myPick === "b" ? `0 0 8px ${b.hue}` : "none" }} />
+              </button>
+              {myPick && <button onClick={() => setExpanded(false)} className="shrink-0 px-2.5" style={{ fontSize: 14, color: "rgba(160,190,255,0.5)", background: "none", border: "none", cursor: "pointer" }} title="Cancel">✕</button>}
+            </div>
+          )}
         </div>
       )}
 
@@ -699,6 +749,8 @@ function TournamentView({ state, isAdmin, teamOf, actions }) {
   const savePredictorName = (n) => { const v = (n || "").trim().slice(0, 24); setPredictorName(v); try { localStorage.setItem("volt-predictor-name", v); } catch {} };
   const [nameEditing, setNameEditing] = useState(false);
   const [nameDraftTop, setNameDraftTop] = useState("");
+  const [, setClockTick] = useState(0);
+  useEffect(() => { const iv = setInterval(() => setClockTick((n) => n + 1), 1000); return () => clearInterval(iv); }, []);
   const [draftFormat, setDraftFormat] = useState("group");
   const [draftBo, setDraftBo] = useState("bo1");
   const [draftGroups, setDraftGroups] = useState(2);
@@ -3247,6 +3299,7 @@ export default function App() {
   const tVote = (locator, side, name) => mutate((s) => {
     const t = s.tournament; if (!t) return null;
     const m = findMatch(t, locator); if (!m || m.done) return null; // no voting once a match is decided
+    if (m.scheduledAt != null && Date.now() >= m.scheduledAt) return null; // predictions lock at kickoff
     const nm = (name || "").trim(); if (!nm) return null;
     if (!m.voters || typeof m.voters !== "object") m.voters = {};
     m.voters[nm] = side; // name -> "a" | "b"
